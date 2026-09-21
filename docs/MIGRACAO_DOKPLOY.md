@@ -8,7 +8,7 @@ ambiente Dokploy concluir restauracao, piloto e aceite.
 
 Arquivos da implantacao:
 
-- `compose.dokploy.yml`: backend, frontend e volume persistente de uploads;
+- `compose.dokploy.yml`: PostgreSQL 16, backend, frontend e volumes persistentes;
 - `deploy/docker/backend.Dockerfile`: build e runtime Java 25 sem usuario root;
 - `deploy/docker/frontend.Dockerfile`: build Node 22 e frontend Nginx;
 - `deploy/docker/nginx.conf`: SPA, proxy interno, cache e compressao;
@@ -58,20 +58,18 @@ homologacao roteado pelo Dokploy e manter o dominio legado onde esta.
 
 1. Criar no Dokploy um projeto exclusivo `RC Operations Hub` e um ambiente
    `homologacao`. Nao usar os projetos de observabilidade nem o projeto do GLPI.
-2. Criar um PostgreSQL 16 exclusivo, inicialmente vazio, chamado
-   `poprc_homolog`.
-3. Nao publicar a porta do PostgreSQL na internet.
-4. Copiar o host, porta, usuario e nome mostrados em Internal Credentials.
-5. Criar uma URL no formato:
-
-```text
-jdbc:postgresql://HOST_INTERNO:5432/poprc_homolog
-```
-
-6. Configurar as variaveis a partir de `deploy/env/dokploy.env.example`.
-7. Definir `APP_PUBLIC_URL` com a URL HTTPS de homologacao, sem barra no final.
-8. Configurar, pela aba Domains, o dominio no servico `frontend`, porta `8080`.
-9. Fazer o primeiro deploy e conferir os health checks dos dois containers.
+2. Criar um servico `Docker Compose` chamado `poprc-homologacao`, usando a
+   branch `main` e o caminho `./compose.dokploy.yml`.
+3. Ativar `Isolated Deployments`. O PostgreSQL 16 fica dentro deste Compose,
+   sem `ports`, e nao deve ser substituido por banco de outro projeto.
+4. Configurar as variaveis a partir de `deploy/env/dokploy.env.example`.
+5. Usar `DB_NAME=poprc_homolog`, usuario exclusivo e senha aleatoria forte.
+6. Definir `APP_PUBLIC_URL` com a URL HTTPS de homologacao, sem barra no final.
+7. Configurar, pela aba Domains, o dominio somente no servico `frontend`, porta
+   `8080`.
+8. Conferir o `Preview Compose`: apenas o frontend recebe roteamento HTTP; nao
+   existe porta publicada para `database` nem para `backend`.
+9. Fazer o primeiro deploy e conferir os health checks dos tres containers.
 
 Nao adicionar Traefik ao arquivo Compose manualmente. O dominio deve ser gerido
 pela interface do Dokploy. Nenhuma credencial real deve entrar no Git.
@@ -87,14 +85,15 @@ sudo ls -lht /var/backups/poprc | head
 ```
 
 O pacote possui `database.dump`, `uploads/`, `manifest.txt` e `SHA256SUMS`.
-Extraia uma copia em diretorio temporario. Restaure `database.dump` somente no
-banco `poprc_homolog`, nunca diretamente sobre o banco de producao. Copie o
-conteudo de `uploads/` para o volume nomeado `poprc_uploads` com os containers
-parados ou por um container auxiliar controlado.
+Extraia uma copia em diretorio temporario e valide `sha256sum --check
+SHA256SUMS`. Restaure `database.dump` somente no banco `poprc_homolog`, dentro
+do servico `database`, nunca diretamente sobre o banco legado. Copie o conteudo
+de `uploads/` para o volume nomeado `poprc_uploads` com o backend parado ou por
+um container auxiliar controlado.
 
 Depois da copia:
 
-1. iniciar PostgreSQL e backend;
+1. iniciar o servico `database` e depois o backend;
 2. aguardar o backend ficar healthy e o Flyway validar as migracoes;
 3. iniciar o frontend;
 4. abrir fotos, evidencias e PDFs antigos;
@@ -102,14 +101,27 @@ Depois da copia:
 
 ## Fase 4 - backups no Dokploy
 
-Configurar dois backups distintos para o mesmo destino S3 privado:
+Criar primeiro um `Compose Job` direcionado ao servico `database`. O horario
+deve ser conferido com o fuso do servidor antes de salvar. Comando:
 
-1. backup logico do PostgreSQL na aba Backup do banco;
-2. Volume Backup do volume nomeado de uploads.
+```bash
+sh -ec 'stamp=$(date -u +%Y%m%dT%H%M%SZ); tmp=/backups/.poprc-$stamp.dump.tmp; PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner --no-privileges -f "$tmp"; mv "$tmp" "/backups/poprc-$stamp.dump"; find /backups -type f -name "poprc-*.dump" -mtime +14 -delete'
+```
 
-Executar o botao Test nas duas configuracoes. Restaurar ambos em recursos de
+Executar o job manualmente e confirmar que um arquivo nao vazio apareceu no
+volume `poprc_db_backups`. Depois configurar os Volume Backups para o mesmo
+destino S3 privado:
+
+1. `poprc_db_backups`, depois do horario do dump logico;
+2. `poprc_uploads`, desligando o backend durante a copia;
+3. opcionalmente `poprc_postgres`, desligando `database` e backend durante a
+   copia fisica.
+
+Executar o botao Test nas configuracoes. Restaurar banco e uploads em recursos de
 homologacao descartaveis antes de considerar a rotina aprovada. O backup geral do
-Dokploy protege a plataforma, nao substitui esses dois backups da aplicacao.
+Dokploy protege a plataforma, nao substitui os backups da aplicacao. Antes
+do corte definitivo, gerar tambem o pacote logico pelo ambiente legado; ele e a
+fonte portavel de restauracao caso seja necessario abandonar os volumes Docker.
 
 ## Fase 5 - homologacao e piloto
 
