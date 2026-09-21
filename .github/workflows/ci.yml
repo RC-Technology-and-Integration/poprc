@@ -104,3 +104,6 @@ jobs:
           --build-arg VITE_APP_REVISION=${GITHUB_SHA::8}
           --tag poprc-frontend:ci
           .
+
+      - name: Validar Nginx do frontend
+        run: docker run --rm --add-host backend:127.0.0.1 poprc-frontend:ci nginx -t

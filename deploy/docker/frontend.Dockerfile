@@ -15,7 +15,6 @@ FROM nginx:1.28-alpine
 
 COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /workspace/dist /usr/share/nginx/html
-RUN nginx -t
 
 EXPOSE 8080
 
