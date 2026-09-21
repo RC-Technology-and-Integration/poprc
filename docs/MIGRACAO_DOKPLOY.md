@@ -46,7 +46,8 @@ Inventario confirmado em 21/09/2026:
 - o Traefik do Dokploy ocupa `8080/8443`;
 - Dokploy, Grafana, Zabbix e GLPI continuam em seus projetos atuais;
 - a porta `8090` esta livre e foi reservada para o frontend de homologacao;
-- o certificado do IP `186.196.9.178` expira em 27/09/2026 e deve ser renovado
+- o certificado do IP `186.196.9.178` usa validade curta de aproximadamente
+  seis dias; a renovacao automatica e o reload do Nginx devem ser homologados
   antes do deploy de homologacao.
 
 ## Fase 1 - preparar e publicar a estrutura
