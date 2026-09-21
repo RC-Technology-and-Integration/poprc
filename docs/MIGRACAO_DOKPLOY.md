@@ -14,6 +14,32 @@ Arquivos da implantacao:
 - `deploy/docker/nginx.conf`: SPA, proxy interno, cache e compressao;
 - `deploy/env/dokploy.env.example`: inventario de variaveis sem credenciais reais.
 
+## Fase 0 - inventario e separacao dos projetos
+
+Antes de alterar qualquer servico, registrar onde cada carga esta executando. O
+POP RC deve possuir projeto proprio no Dokploy, separado dos projetos de Zabbix,
+Grafana e GLPI. Nao reutilizar bancos, volumes, dominios ou variaveis desses
+projetos.
+
+Na VPS legada, coletar sem alterar nada:
+
+```bash
+hostnamectl --static
+ip -br address
+sudo ss -ltnp | grep -E ':(80|443|5432|8085)\b' || true
+sudo systemctl status poprc.service nginx postgresql --no-pager
+sudo systemctl list-timers poprc-backup.timer --no-pager
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}'
+docker network ls
+docker volume ls
+```
+
+No Dokploy, registrar para cada projeto existente: projeto, ambiente, servicos,
+dominios, banco, volumes e servidor de destino. Confirmar especialmente se o
+Dokploy e o legado compartilham a mesma VPS. Se compartilharem, nao alterar as
+portas 80/443, o Nginx ou o Traefik durante a homologacao; usar um dominio de
+homologacao roteado pelo Dokploy e manter o dominio legado onde esta.
+
 ## Fase 1 - preparar e publicar a estrutura
 
 1. Confirmar que o backup diario atual continua com `Result=success`.
@@ -23,24 +49,29 @@ Arquivos da implantacao:
    imagens antes da criacao do ambiente de homologacao.
 4. No Dokploy, usar o tipo `Docker Compose`, branch `main` e caminho
    `./compose.dokploy.yml`.
-5. Ativar Isolated Deployments somente depois de conferir no Preview Compose se
-   frontend e backend continuam na mesma rede e se o backend alcanca o banco.
+5. Ativar `Isolated Deployments`. O Compose mantem uma rede privada propria entre
+   frontend e backend, e o Dokploy adiciona a rede isolada usada pelo Traefik.
+6. Conferir no `Preview Compose` que nenhuma rede, volume, porta ou nome de
+   container pertencente a Zabbix, Grafana ou GLPI foi incorporado.
 
 ## Fase 2 - criar a homologacao no Dokploy
 
-1. Criar um PostgreSQL exclusivo, inicialmente vazio, chamado `poprc_homolog`.
-2. Nao publicar a porta do PostgreSQL na internet.
-3. Copiar o host, porta, usuario e nome mostrados em Internal Credentials.
-4. Criar uma URL no formato:
+1. Criar no Dokploy um projeto exclusivo `RC Operations Hub` e um ambiente
+   `homologacao`. Nao usar os projetos de observabilidade nem o projeto do GLPI.
+2. Criar um PostgreSQL 16 exclusivo, inicialmente vazio, chamado
+   `poprc_homolog`.
+3. Nao publicar a porta do PostgreSQL na internet.
+4. Copiar o host, porta, usuario e nome mostrados em Internal Credentials.
+5. Criar uma URL no formato:
 
 ```text
 jdbc:postgresql://HOST_INTERNO:5432/poprc_homolog
 ```
 
-5. Configurar as variaveis a partir de `deploy/env/dokploy.env.example`.
-6. Definir `APP_PUBLIC_URL` com a URL HTTPS de homologacao, sem barra no final.
-7. Configurar, pela aba Domains, o dominio no servico `frontend`, porta `8080`.
-8. Fazer o primeiro deploy e conferir os health checks dos dois containers.
+6. Configurar as variaveis a partir de `deploy/env/dokploy.env.example`.
+7. Definir `APP_PUBLIC_URL` com a URL HTTPS de homologacao, sem barra no final.
+8. Configurar, pela aba Domains, o dominio no servico `frontend`, porta `8080`.
+9. Fazer o primeiro deploy e conferir os health checks dos dois containers.
 
 Nao adicionar Traefik ao arquivo Compose manualmente. O dominio deve ser gerido
 pela interface do Dokploy. Nenhuma credencial real deve entrar no Git.

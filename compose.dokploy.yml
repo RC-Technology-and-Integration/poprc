@@ -39,7 +39,6 @@ services:
       - no-new-privileges:true
     networks:
       - internal
-      - dokploy-network
 
   frontend:
     build:
@@ -60,7 +59,6 @@ services:
       - no-new-privileges:true
     networks:
       - internal
-      - dokploy-network
 
 volumes:
   poprc_uploads:
@@ -68,5 +66,3 @@ volumes:
 networks:
   internal:
     internal: true
-  dokploy-network:
-    external: true
