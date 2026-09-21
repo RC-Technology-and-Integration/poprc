@@ -88,6 +88,21 @@ Nao adicionar Traefik ao arquivo Compose manualmente. Depois do deploy, criar um
 `proxy_pass http://127.0.0.1:8090`. Nao substituir o bloco `poprc` existente.
 Nenhuma credencial real deve entrar no Git.
 
+### Homologacao temporaria sem DNS
+
+Enquanto nao houver acesso ao DNS, usar `https://186.196.9.178:9443` como
+`APP_PUBLIC_URL`. A porta `443` continua pertencendo ao ambiente legado. O
+arquivo `deploy/nginx/poprc-homolog-ip.conf.example` publica a homologacao em
+`9443` usando o certificado IP existente e encaminha para
+`127.0.0.1:8090`.
+
+Antes de habilitar o arquivo, confirmar que `9443` esta livre. Abrir essa porta
+no firewall preferencialmente apenas para os IPs autorizados a homologar. Nao
+usar prefixo de caminho como `/homologacao`, pois o frontend e os cookies foram
+configurados para operar na raiz da origem. Quando o dominio definitivo estiver
+disponivel, trocar `APP_PUBLIC_URL`, criar um bloco Nginx por nome e remover a
+exposicao temporaria de `9443`.
+
 ## Fase 3 - restaurar uma copia dos dados
 
 Gerar um backup final no ambiente antigo:
