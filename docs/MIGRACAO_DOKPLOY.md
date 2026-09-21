@@ -37,8 +37,17 @@ docker volume ls
 No Dokploy, registrar para cada projeto existente: projeto, ambiente, servicos,
 dominios, banco, volumes e servidor de destino. Confirmar especialmente se o
 Dokploy e o legado compartilham a mesma VPS. Se compartilharem, nao alterar as
-portas 80/443, o Nginx ou o Traefik durante a homologacao; usar um dominio de
-homologacao roteado pelo Dokploy e manter o dominio legado onde esta.
+portas 80/443, o Nginx ou o Traefik durante a homologacao.
+
+Inventario confirmado em 21/09/2026:
+
+- o Nginx do host ocupa `80/443` e entrega o POP RC legado;
+- o backend legado permanece restrito a `127.0.0.1:8085`;
+- o Traefik do Dokploy ocupa `8080/8443`;
+- Dokploy, Grafana, Zabbix e GLPI continuam em seus projetos atuais;
+- a porta `8090` esta livre e foi reservada para o frontend de homologacao;
+- o certificado do IP `186.196.9.178` expira em 27/09/2026 e deve ser renovado
+  antes do deploy de homologacao.
 
 ## Fase 1 - preparar e publicar a estrutura
 
@@ -65,14 +74,18 @@ homologacao roteado pelo Dokploy e manter o dominio legado onde esta.
 4. Configurar as variaveis a partir de `deploy/env/dokploy.env.example`.
 5. Usar `DB_NAME=poprc_homolog`, usuario exclusivo e senha aleatoria forte.
 6. Definir `APP_PUBLIC_URL` com a URL HTTPS de homologacao, sem barra no final.
-7. Configurar, pela aba Domains, o dominio somente no servico `frontend`, porta
-   `8080`.
-8. Conferir o `Preview Compose`: apenas o frontend recebe roteamento HTTP; nao
-   existe porta publicada para `database` nem para `backend`.
+7. Manter a aba Domains do Dokploy sem dominio para este Compose. O frontend e
+   publicado apenas em `127.0.0.1:8090`; o Nginx do host sera responsavel pelo
+   dominio e pelo certificado HTTPS de homologacao.
+8. Conferir o `Preview Compose`: somente o frontend publica
+   `127.0.0.1:8090->8080`; nao existe porta publicada para `database` nem para
+   `backend`.
 9. Fazer o primeiro deploy e conferir os health checks dos tres containers.
 
-Nao adicionar Traefik ao arquivo Compose manualmente. O dominio deve ser gerido
-pela interface do Dokploy. Nenhuma credencial real deve entrar no Git.
+Nao adicionar Traefik ao arquivo Compose manualmente. Depois do deploy, criar um
+`server` separado no Nginx do host para o dominio de homologacao, com
+`proxy_pass http://127.0.0.1:8090`. Nao substituir o bloco `poprc` existente.
+Nenhuma credencial real deve entrar no Git.
 
 ## Fase 3 - restaurar uma copia dos dados
 

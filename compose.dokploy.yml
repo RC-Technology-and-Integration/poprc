@@ -80,6 +80,8 @@ services:
         condition: service_healthy
     expose:
       - "8080"
+    ports:
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-8090}:8080"
     mem_limit: ${FRONTEND_MEMORY_LIMIT:-128m}
     cpus: ${FRONTEND_CPU_LIMIT:-0.5}
     security_opt:
