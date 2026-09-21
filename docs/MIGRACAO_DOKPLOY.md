@@ -60,12 +60,12 @@ Inventario confirmado em 21/09/2026:
 4. No Dokploy, usar o tipo `Docker Compose`, branch `main` e caminho
    `./compose.dokploy.yml`.
 5. Manter `Isolated Deployments` desativado. Esse recurso esta depreciado na
-   versao atual do Dokploy e adicionaria uma rede externa desnecessaria aos tres
-   servicos. Como nao ha dominio no Dokploy, a rede `internal` declarada no
-   Compose e suficiente.
-6. Conferir no `Preview Compose` que aparece somente a rede `internal` e que
-   nenhuma rede, volume, porta ou nome de container pertencente a Zabbix,
-   Grafana ou GLPI foi incorporado.
+   versao atual do Dokploy e adicionaria uma rede externa aos tres servicos.
+   O Compose usa `internal` para banco/backend e `edge` somente no frontend.
+6. Conferir no `Preview Compose` que aparecem somente as redes `internal` e
+   `edge`, que apenas o frontend participa das duas e que nenhuma rede, volume,
+   porta ou nome de container pertencente a Zabbix, Grafana ou GLPI foi
+   incorporado.
 
 ## Fase 2 - criar a homologacao no Dokploy
 
@@ -73,18 +73,20 @@ Inventario confirmado em 21/09/2026:
    `homologacao`. Nao usar os projetos de observabilidade nem o projeto do GLPI.
 2. Criar um servico `Docker Compose` chamado `poprc-homologacao`, usando a
    branch `main` e o caminho `./compose.dokploy.yml`.
-3. Manter `Isolated Deployments` desativado e a aba Domains vazia. O PostgreSQL
-   16 fica dentro deste Compose, somente na rede `internal`, sem `ports`, e nao
-   deve ser substituido por banco de outro projeto.
+3. Manter `Isolated Deployments` desativado e a aba Domains vazia. PostgreSQL e
+   backend ficam somente na rede `internal`; o frontend tambem recebe a rede
+   `edge`, necessaria para o Docker publicar a porta local. O PostgreSQL fica
+   sem `ports` e nao deve ser substituido por banco de outro projeto.
 4. Configurar as variaveis a partir de `deploy/env/dokploy.env.example`.
 5. Usar `DB_NAME=poprc_homolog`, usuario exclusivo e senha aleatoria forte.
 6. Definir `APP_PUBLIC_URL` com a URL HTTPS de homologacao, sem barra no final.
 7. Manter a aba Domains do Dokploy sem dominio para este Compose. O frontend e
    publicado apenas em `127.0.0.1:8090`; o Nginx do host sera responsavel pelo
    dominio e pelo certificado HTTPS de homologacao.
-8. Conferir o `Preview Compose`: somente a rede `internal` aparece e somente o
-   frontend publica `127.0.0.1:8090->8080`; nao existe porta publicada para
-   `database` nem para `backend`.
+8. Conferir o `Preview Compose`: `database` e `backend` usam apenas `internal`;
+   `frontend` usa `internal` e `edge` e publica
+   `127.0.0.1:8090->8080`. Nao existe porta publicada para `database` nem para
+   `backend`.
 9. Fazer o primeiro deploy e conferir os health checks dos tres containers.
 
 Nao adicionar Traefik ao arquivo Compose manualmente. Depois do deploy, criar um
@@ -99,6 +101,11 @@ Enquanto nao houver acesso ao DNS, usar `https://186.196.9.178:9443` como
 arquivo `deploy/nginx/poprc-homolog-ip.conf.example` publica a homologacao em
 `9443` usando o certificado IP existente e encaminha para
 `127.0.0.1:8090`.
+
+O frontend precisa participar tambem da rede nao interna `edge`. Em versoes
+recentes do Docker, o bind pode permanecer apenas em `HostConfig.PortBindings`
+e nao ser ativado quando o container participa exclusivamente de uma rede
+`internal`. Banco e backend continuam fora de `edge`.
 
 Antes de habilitar o arquivo, confirmar que `9443` esta livre. Abrir essa porta
 no firewall preferencialmente apenas para os IPs autorizados a homologar. Nao
