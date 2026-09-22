@@ -1,0 +1,11 @@
+[Unit]
+Description=Exportacao diaria do backup do POP RC no Dokploy
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+Unit=poprc-dokploy-export.service
+
+[Install]
+WantedBy=timers.target

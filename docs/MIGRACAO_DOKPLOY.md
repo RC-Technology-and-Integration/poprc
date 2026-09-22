@@ -163,6 +163,29 @@ Dokploy protege a plataforma, nao substitui os backups da aplicacao. Antes
 do corte definitivo, gerar tambem o pacote logico pelo ambiente legado; ele e a
 fonte portavel de restauracao caso seja necessario abandonar os volumes Docker.
 
+### Copia externa sem S3
+
+Quando houver um servidor Linux fora da VPS, a copia externa pode ser feita por
+SSH sem instalar Docker ou MinIO nesse servidor. A VPS gera um pacote portatil
+com o dump logico e os uploads, e o servidor externo faz o pull pela porta SSH.
+Esse fluxo nao usa o recurso Volume Backups do Dokploy, mas evita manter todas
+as copias no mesmo host.
+
+Na VPS, instalar `deploy/scripts/export-dokploy-backup.sh` e as unidades
+`poprc-dokploy-export.*`. O timer roda as 04:00 UTC, depois do dump logico das
+03:30 UTC. Os pacotes ficam em `/var/backups/poprc-dokploy-export`, acessiveis
+somente por `root` e pelo grupo `poprc-backup`.
+
+No servidor externo, instalar `rsync`, `deploy/scripts/pull-dokploy-backups.sh`
+e as unidades `poprc-backup-pull.*`. Usar uma chave SSH exclusiva, sem reutilizar
+chaves pessoais. O pull nao usa `--delete`: a retencao local e independente da
+retencao da VPS. Cada pacote e extraido temporariamente e validado pelo arquivo
+`SHA256SUMS` antes de receber o marcador `.verified`.
+
+O servidor externo deve permanecer ligado no horario do timer e possuir espaco
+monitorado. Uma copia em notebook ou disco unico e uma segunda localizacao, mas
+nao substitui uma futura copia imutavel ou em provedor externo.
+
 ## Fase 5 - homologacao e piloto
 
 1. Verificar `/actuator/health` e `/healthz`.

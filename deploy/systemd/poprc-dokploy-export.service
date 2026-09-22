@@ -1,0 +1,12 @@
+[Unit]
+Description=Exporta backup portatil do POP RC no Dokploy
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/poprc-dokploy-export
+UMask=0027
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

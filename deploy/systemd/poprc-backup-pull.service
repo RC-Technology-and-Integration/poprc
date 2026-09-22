@@ -1,0 +1,12 @@
+[Unit]
+Description=Baixa backups do POP RC para o servidor local
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/poprc-backup-pull
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

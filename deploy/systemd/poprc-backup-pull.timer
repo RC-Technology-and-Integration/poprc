@@ -1,0 +1,11 @@
+[Unit]
+Description=Sincronizacao diaria dos backups externos do POP RC
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=5m
+Unit=poprc-backup-pull.service
+
+[Install]
+WantedBy=timers.target
