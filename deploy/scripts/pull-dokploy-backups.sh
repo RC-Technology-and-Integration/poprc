@@ -32,6 +32,8 @@ flock -n 9 || {
 SSH_COMMAND="ssh -i $IDENTITY_FILE -p $REMOTE_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes"
 rsync \
     --archive \
+    --no-owner \
+    --no-group \
     --partial \
     --ignore-existing \
     --chmod=F600,D700 \
@@ -56,7 +58,8 @@ while IFS= read -r -d '' archive; do
         exit 1
     fi
     touch "$marker"
-    chmod 0600 "$marker"
+    chown root:root "$archive" "$marker"
+    chmod 0600 "$archive" "$marker"
     rm -rf -- "$verify_dir"
 done
 
