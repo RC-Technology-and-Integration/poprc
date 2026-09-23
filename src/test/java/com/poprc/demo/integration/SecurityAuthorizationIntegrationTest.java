@@ -12,8 +12,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.poprc.demo.DemoApplication;
+import com.poprc.demo.model.Contrato;
 import com.poprc.demo.model.Funcionario;
 import com.poprc.demo.model.PerfilAcesso;
+import com.poprc.demo.repository.ContratoRepository;
 import com.poprc.demo.repository.FuncionarioRepository;
 import com.poprc.demo.security.UsuarioAutenticado;
 import org.junit.jupiter.api.Test;
@@ -45,6 +47,9 @@ class SecurityAuthorizationIntegrationTest {
 
     @Autowired
     private FuncionarioRepository funcionarioRepository;
+
+    @Autowired
+    private ContratoRepository contratoRepository;
 
     @Test
     void apiSemSessaoRetornaNaoAutorizado() throws Exception {
@@ -143,6 +148,26 @@ class SecurityAuthorizationIntegrationTest {
                         .content("{}"))
                 .andReturn().getResponse().getStatus();
         assertThat(status).isEqualTo(403);
+    }
+
+    @Test
+    void estoqueConsultaApenasOpcoesDeContratoSemDadosFinanceiros() throws Exception {
+        Contrato contrato = new Contrato();
+        contrato.setCliente("Cliente de teste");
+        contrato.setContrato("ESTOQUE-TESTE");
+        contrato.setValorGlobal(new java.math.BigDecimal("123456.78"));
+        contrato.setEscopo("Escopo reservado");
+        contratoRepository.save(contrato);
+
+        String resposta = mockMvc.perform(get("/api/contratos/opcoes-estoque")
+                        .with(user("estoquista").roles("ESTOQUE")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(resposta).contains("ESTOQUE-TESTE", "Cliente de teste")
+                .doesNotContain("valorGlobal", "escopo", "Escopo reservado", "123456.78");
+        mockMvc.perform(get("/api/contratos")
+                        .with(user("estoquista").roles("ESTOQUE")))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -259,6 +284,9 @@ class SecurityAuthorizationIntegrationTest {
                 Arguments.of("ADMIN", "/api/contratos", true),
                 Arguments.of("SUPERVISOR_TECNICO", "/api/contratos", true),
                 Arguments.of("AUDITOR", "/api/contratos", false),
+                Arguments.of("ESTOQUE", "/api/contratos/opcoes-estoque", true),
+                Arguments.of("TECNICO", "/api/contratos/opcoes-estoque", false),
+                Arguments.of("AUDITOR", "/api/contratos/opcoes-estoque", false),
                 Arguments.of("ADMIN", "/api/projetos", true),
                 Arguments.of("SUPERVISOR_TECNICO", "/api/projetos", true),
                 Arguments.of("ESTOQUE", "/api/projetos", false),

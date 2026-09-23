@@ -25,6 +25,19 @@ public class ContratoController {
     private final ContratoRepository contratoRepository;
     private final ArquivamentoService arquivamentoService;
 
+    public record OpcaoContratoEstoque(Long id, String cliente, String contrato, Boolean arquivado) {
+    }
+
+    @GetMapping("/opcoes-estoque")
+    public ResponseEntity<List<OpcaoContratoEstoque>> listarOpcoesEstoque() {
+        List<OpcaoContratoEstoque> opcoes = contratoRepository.findAll().stream()
+                .filter(item -> !Boolean.TRUE.equals(item.getArquivado()))
+                .map(item -> new OpcaoContratoEstoque(
+                        item.getId(), item.getCliente(), item.getContrato(), item.getArquivado()))
+                .toList();
+        return ResponseEntity.ok(opcoes);
+    }
+
     /**
      * POST: Salvar novo contrato recebendo JSON do React
      */

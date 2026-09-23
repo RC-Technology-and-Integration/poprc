@@ -408,7 +408,7 @@ export default function PainelEstoque() {
 
       const [funcionariosResponse, contratosResponse] = await Promise.all([
         api.get("/funcionarios"),
-        api.get("/contratos"),
+        api.get(usuario?.perfil === "ESTOQUE" ? "/contratos/opcoes-estoque" : "/contratos"),
       ]);
       setFuncionarios(funcionariosResponse.data);
       setContratos(contratosResponse.data || []);

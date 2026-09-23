@@ -107,6 +107,8 @@ public class SecurityConfig {
                             .hasAnyRole("ADMIN", "SUPERVISOR_TECNICO");
                     authorize.requestMatchers("/api/faturamentos/**", "/api/financeiro/**", "/api/relatorios/**")
                             .hasRole("ADMIN");
+                    authorize.requestMatchers(HttpMethod.GET, "/api/contratos/opcoes-estoque")
+                            .hasAnyRole("ADMIN", "ESTOQUE");
                     authorize.requestMatchers("/api/contratos/**")
                             .hasAnyRole("ADMIN", "SUPERVISOR_TECNICO");
                     authorize.requestMatchers("/api/projetos/**")
