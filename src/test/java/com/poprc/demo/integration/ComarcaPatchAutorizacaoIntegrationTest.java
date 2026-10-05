@@ -18,6 +18,7 @@ import com.poprc.demo.repository.ProjetoMembroRepository;
 import com.poprc.demo.repository.ProjetoRepository;
 import com.poprc.demo.security.UsuarioAutenticado;
 import java.math.BigDecimal;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -52,6 +53,9 @@ class ComarcaPatchAutorizacaoIntegrationTest {
     private Funcionario tecnicoDaEquipe;
     private Funcionario supervisor;
     private Long obraId;
+    private Long projetoDaObraId;
+    private Long projetoOutraEquipeId;
+    private Long membroId;
 
     @BeforeEach
     void prepararEquipes() {
@@ -60,13 +64,14 @@ class ComarcaPatchAutorizacaoIntegrationTest {
         supervisor = funcionario("Supervisor", PerfilAcesso.SUPERVISOR_TECNICO);
 
         Projeto projetoDaObra = projeto(supervisor);
-        projeto(tecnicoOutraEquipe);
+        projetoDaObraId = projetoDaObra.getId();
+        projetoOutraEquipeId = projeto(tecnicoOutraEquipe).getId();
 
         ProjetoMembro membro = new ProjetoMembro();
         membro.setProjeto(projetoDaObra);
         membro.setFuncionario(tecnicoDaEquipe);
         membro.setPapel("TECNICO");
-        membros.saveAndFlush(membro);
+        membroId = membros.saveAndFlush(membro).getId();
 
         Comarca obra = new Comarca();
         obra.setNomeComarca("Obra HTTP autorizacao");
@@ -75,6 +80,17 @@ class ComarcaPatchAutorizacaoIntegrationTest {
         obra.setSituacao("EM_ANDAMENTO");
         obra.setPendencias("original");
         obraId = comarcas.saveAndFlush(obra).getId();
+    }
+
+    @AfterEach
+    void removerDadosSinteticos() {
+        if (obraId != null) comarcas.deleteById(obraId);
+        if (membroId != null) membros.deleteById(membroId);
+        if (projetoDaObraId != null) projetos.deleteById(projetoDaObraId);
+        if (projetoOutraEquipeId != null) projetos.deleteById(projetoOutraEquipeId);
+        if (tecnicoOutraEquipe != null) funcionarios.deleteById(tecnicoOutraEquipe.getId());
+        if (tecnicoDaEquipe != null) funcionarios.deleteById(tecnicoDaEquipe.getId());
+        if (supervisor != null) funcionarios.deleteById(supervisor.getId());
     }
 
     @ParameterizedTest

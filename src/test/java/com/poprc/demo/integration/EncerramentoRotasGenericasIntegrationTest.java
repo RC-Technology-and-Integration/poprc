@@ -26,6 +26,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -81,6 +82,13 @@ class EncerramentoRotasGenericasIntegrationTest {
         obra.setSituacao("EM_ANDAMENTO");
         obra.setPercentualConcluido(BigDecimal.TEN);
         obra = comarcas.saveAndFlush(obra);
+    }
+
+    @AfterEach
+    void removerDadosSinteticos() {
+        if (obra != null) comarcas.deleteById(obra.getId());
+        if (os != null) ordens.deleteById(os.getId());
+        if (gestor != null) funcionarios.deleteById(gestor.getId());
     }
 
     @ParameterizedTest
