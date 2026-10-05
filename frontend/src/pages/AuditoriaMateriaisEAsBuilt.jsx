@@ -23,6 +23,7 @@ export default function AuditoriaMateriaisEAsBuilt() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [justificativaHomologacao, setJustificativaHomologacao] = useState("");
 
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
@@ -70,6 +71,7 @@ export default function AuditoriaMateriaisEAsBuilt() {
 
   useEffect(() => {
     if (selectedComarcaId) {
+      setJustificativaHomologacao("");
       carregarAuditoria(selectedComarcaId);
     }
   }, [selectedComarcaId]);
@@ -78,8 +80,10 @@ export default function AuditoriaMateriaisEAsBuilt() {
     try {
       const response = await api.patch(
         `/comarcas/${selectedComarcaId}/as-built/homologar`,
+        { justificativa: justificativaHomologacao },
       );
       setDados(response.data);
+      setJustificativaHomologacao("");
       const rastreabilidadeResponse = await api.get(
         `/comarcas/${selectedComarcaId}/rastreabilidade-estoque`,
       );
@@ -534,12 +538,46 @@ export default function AuditoriaMateriaisEAsBuilt() {
                   {statusLabel}
                 </p>
               </div>
+              {!asBuiltHomologado && !conciliado && materiais.length > 0 && (
+                <label className="block text-sm text-slate-300">
+                  Justificativa da divergência <span className="text-rose-400">*</span>
+                  <textarea
+                    value={justificativaHomologacao}
+                    onChange={(event) => setJustificativaHomologacao(event.target.value)}
+                    rows={4}
+                    className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-white"
+                    placeholder="Explique a divergência registrada na auditoria"
+                    required
+                  />
+                </label>
+              )}
+              {dados?.homologacaoLegadaSemJustificativa && (
+                <p className="text-xs text-amber-300">
+                  Homologação anterior à exigência de justificativa; não há texto registrado.
+                </p>
+              )}
+              {dados?.homologacoes?.length > 0 && (
+                <div className="space-y-2 text-sm text-slate-300">
+                  <h3 className="font-semibold">Histórico de homologações</h3>
+                  {dados.homologacoes.map((homologacao) => (
+                    <div key={homologacao.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                      <p className="text-xs text-slate-400">
+                        {statusLabels[homologacao.status] || homologacao.status} · {formatarDataHora(homologacao.registradoEm)}
+                        {homologacao.responsavel && ` · ${homologacao.responsavel}`}
+                      </p>
+                      {homologacao.justificativa && (
+                        <p className="mt-2 whitespace-pre-wrap break-words">{homologacao.justificativa}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {!asBuiltHomologado ? (
               <button
                 onClick={homologarAsBuilt}
-                disabled={!podeHomologar}
+                disabled={!podeHomologar || (!conciliado && !justificativaHomologacao.trim())}
                 className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl text-sm transition shadow-lg shadow-indigo-600/10"
               >
                 {materiais.length === 0

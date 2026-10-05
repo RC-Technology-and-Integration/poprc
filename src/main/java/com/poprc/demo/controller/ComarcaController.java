@@ -9,6 +9,7 @@ import com.poprc.demo.service.ComarcaService;
 import com.poprc.demo.service.AcessoOperacionalService;
 import com.poprc.demo.service.ArquivamentoService;
 import com.poprc.demo.repository.ComarcaRepository;
+import com.poprc.demo.security.UsuarioAutenticado;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
@@ -76,7 +77,12 @@ public class ComarcaController {
     }
 
     @PatchMapping("/{id}/progresso")
-    public ResponseEntity<Comarca> atualizarProgresso(@PathVariable Long id, @RequestBody ProgressoRequest request) {
+    public ResponseEntity<Comarca> atualizarProgresso(
+            @PathVariable Long id,
+            @RequestBody ProgressoRequest request,
+            Authentication authentication) {
+        if (comarcaService.obterPorId(id).isEmpty()) return ResponseEntity.notFound().build();
+        acessoOperacionalService.garantirAcessoComarca(id, authentication);
         Comarca comarca = comarcaService.atualizarProgresso(id, request.getPercentualConcluido(),
                 request.getSituacao());
         if (comarca != null) {
@@ -86,7 +92,12 @@ public class ComarcaController {
     }
 
     @PatchMapping("/{id}/pendencias")
-    public ResponseEntity<Comarca> atualizarPendencias(@PathVariable Long id, @RequestBody PendenciasRequest request) {
+    public ResponseEntity<Comarca> atualizarPendencias(
+            @PathVariable Long id,
+            @RequestBody PendenciasRequest request,
+            Authentication authentication) {
+        if (comarcaService.obterPorId(id).isEmpty()) return ResponseEntity.notFound().build();
+        acessoOperacionalService.garantirAcessoComarca(id, authentication);
         Comarca comarca = comarcaService.atualizarPendencias(id, request.getPendencias());
         if (comarca != null) {
             return ResponseEntity.ok(comarca);
@@ -95,7 +106,12 @@ public class ComarcaController {
     }
 
     @PatchMapping("/{id}")
-    public ResponseEntity<Comarca> atualizar(@PathVariable Long id, @RequestBody AtualizacaoComarcaRequest request) {
+    public ResponseEntity<Comarca> atualizar(
+            @PathVariable Long id,
+            @RequestBody AtualizacaoComarcaRequest request,
+            Authentication authentication) {
+        if (comarcaService.obterPorId(id).isEmpty()) return ResponseEntity.notFound().build();
+        acessoOperacionalService.garantirAcessoComarca(id, authentication);
         Comarca comarca = comarcaService.atualizarComarca(id, request.getPercentualConcluido(),
                 request.getPendencias());
         if (comarca != null) {
@@ -218,8 +234,15 @@ public class ComarcaController {
     }
 
     @PatchMapping("/{id}/as-built/homologar")
-    public ResponseEntity<Map<String, Object>> homologarAsBuilt(@PathVariable Long id) {
-        return ResponseEntity.ok(comarcaService.homologarAsBuilt(id));
+    public ResponseEntity<Map<String, Object>> homologarAsBuilt(
+            @PathVariable Long id, @RequestBody(required = false) HomologarAsBuiltRequest request,
+            Authentication authentication) {
+        String responsavel = authentication == null ? "Auditoria de Retirada/Devolução" : authentication.getName();
+        if (authentication != null && authentication.getPrincipal() instanceof UsuarioAutenticado usuario) {
+            responsavel = usuario.getNome();
+        }
+        return ResponseEntity.ok(comarcaService.homologarAsBuilt(
+                id, request == null ? null : request.getJustificativa(), responsavel));
     }
 
     @PatchMapping("/{id}/concluir")
@@ -270,7 +293,9 @@ public class ComarcaController {
     @PatchMapping("/{id}/materiais-faltantes")
     public ResponseEntity<Comarca> atualizarMateriaisFaltantes(
             @PathVariable Long id,
-            @RequestBody MateriaisFaltantesRequest request) {
+            @RequestBody MateriaisFaltantesRequest request,
+            Authentication authentication) {
+        acessoOperacionalService.garantirAcessoComarca(id, authentication);
         return ResponseEntity.ok(comarcaService.atualizarMateriaisFaltantes(
                 id,
                 request.getFaltouMaterial(),
@@ -281,7 +306,9 @@ public class ComarcaController {
     @PatchMapping("/materiais-previstos/{materialId}/timeline")
     public ResponseEntity<Comarca> atualizarTimelineMaterial(
             @PathVariable Long materialId,
-            @RequestBody TimelineMaterialRequest request) {
+            @RequestBody TimelineMaterialRequest request,
+            Authentication authentication) {
+        acessoOperacionalService.garantirAcessoMaterialPrevisto(materialId, authentication);
         return ResponseEntity.ok(comarcaService.atualizarTimelineMaterial(
                 materialId,
                 request.getDataHoraSolicitacao(),
@@ -440,6 +467,18 @@ public class ComarcaController {
 
         public void setConcluida(Boolean concluida) {
             this.concluida = concluida;
+        }
+    }
+
+    public static class HomologarAsBuiltRequest {
+        private String justificativa;
+
+        public String getJustificativa() {
+            return justificativa;
+        }
+
+        public void setJustificativa(String justificativa) {
+            this.justificativa = justificativa;
         }
     }
 

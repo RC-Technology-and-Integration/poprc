@@ -46,9 +46,11 @@ O ambiente deve apresentar o contrato `DEV-CONTRATO-001`, a obra
    automaticamente para `EM_EXECUCAO`.
 6. Entre na **Area do Tecnico** com um membro da equipe, registre o checklist e
    envie evidencias fotograficas.
-7. Complete Infraestrutura e Virada de Rede em **Gestao de Obras**.
+7. Complete Infraestrutura e Virada de Rede em **Gestao de Obras**. Esta frente
+   pode avancar em paralelo com o envio e a validacao do relatorio tecnico.
 8. Envie a OS para validacao administrativa e aprove a execucao. A OS deve
-   ficar em `AGUARDANDO_DEVOLUCAO`.
+   ficar em `AGUARDANDO_DEVOLUCAO`; nao e necessario esperar a Virada de Rede
+   para enviar o relatorio.
 9. Registre a devolucao: a ferramenta deve retornar integralmente; consumo e
    metragem podem retornar parcialmente.
 10. Confirme o status automatico `AGUARDANDO_AUDITORIA`. Em **Retirada e

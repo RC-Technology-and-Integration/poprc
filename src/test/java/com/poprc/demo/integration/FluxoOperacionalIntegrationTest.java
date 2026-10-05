@@ -187,13 +187,42 @@ class FluxoOperacionalIntegrationTest {
         submeterEConcluirOs(os, cenario.projetoId());
         comarcaService.atualizarQuantidadeAuditada(consumo.getId(), BigDecimal.valueOf(7));
         comarcaService.atualizarQuantidadeAuditada(ferramenta.getId(), BigDecimal.ONE);
-        Map<String, Object> auditoria = comarcaService.homologarAsBuilt(cenario.comarcaId());
+        for (String justificativaInvalida : List.of("", "   ")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> comarcaService.homologarAsBuilt(cenario.comarcaId(), justificativaInvalida));
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> comarcaService.homologarAsBuilt(cenario.comarcaId(), null));
+        assertEquals("DIVERGENTE", comarcaRepository.findById(cenario.comarcaId()).orElseThrow().getAsBuiltStatus());
+        Comarca homologacaoLegada = comarcaRepository.findById(cenario.comarcaId()).orElseThrow();
+        homologacaoLegada.setAsBuiltStatus("HOMOLOGADO_COM_DIVERGENCIA");
+        comarcaRepository.saveAndFlush(homologacaoLegada);
+        assertEquals(true, comarcaService.buscarAuditoriaPorComarca(cenario.comarcaId())
+                .get("homologacaoLegadaSemJustificativa"));
+        assertEquals(true, comarcaService.reabrirAsBuilt(cenario.comarcaId())
+                .get("homologacaoLegadaSemJustificativa"));
+        Map<String, Object> auditoria = comarcaService.homologarAsBuilt(
+                cenario.comarcaId(), "  Consumo auditado abaixo do previsto  ");
 
         assertEquals("HOMOLOGADO_COM_DIVERGENCIA", auditoria.get("asBuiltStatus"));
+        assertEquals("Consumo auditado abaixo do previsto",
+                ((Map<?, ?>) ((List<?>) auditoria.get("homologacoes")).get(0)).get("justificativa"));
+        assertThrows(IllegalStateException.class,
+                () -> comarcaService.homologarAsBuilt(cenario.comarcaId(), "Tentativa de alterar"));
+        assertThrows(IllegalArgumentException.class,
+                () -> comarcaService.adicionarMaterialPrevisto(
+                        cenario.comarcaId(), cenario.consumoId(), "Cabo extra", BigDecimal.ONE));
+        assertThrows(IllegalArgumentException.class,
+                () -> comarcaService.adicionarItemAdicional(
+                        cenario.comarcaId(), cenario.consumoId(), "Cabo extra", BigDecimal.ONE));
         assertEquals("HOMOLOGADO_COM_DIVERGENCIA",
                 comarcaRepository.findById(cenario.comarcaId()).orElseThrow().getAsBuiltStatus());
         assertEquals("HOMOLOGADO_COM_DIVERGENCIA",
                 projetoRepository.findById(cenario.projetoId()).orElseThrow().getAsBuiltStatus());
+        Map<String, Object> reaberta = comarcaService.reabrirAsBuilt(cenario.comarcaId());
+        assertEquals("REABERTO_PARA_AJUSTE", reaberta.get("asBuiltStatus"));
+        assertEquals("Consumo auditado abaixo do previsto",
+                ((Map<?, ?>) ((List<?>) reaberta.get("homologacoes")).get(0)).get("justificativa"));
     }
 
     @Test
@@ -238,7 +267,7 @@ class FluxoOperacionalIntegrationTest {
 
         MaterialItem consumo = itemDaOr(ordemRetirada, cenario.consumoId());
         comarcaService.atualizarQuantidadeAuditada(consumo.getId(), BigDecimal.valueOf(3));
-        comarcaService.homologarAsBuilt(cenario.comarcaId());
+        comarcaService.homologarAsBuilt(cenario.comarcaId(), "Consumo parcial registrado");
         assertEquals(StatusOS.AGUARDANDO_ENCERRAMENTO,
                 ordemServicoService.atualizarStatus(os.getId(), StatusOS.AGUARDANDO_ENCERRAMENTO).getStatus());
         criarDocumentoFinalRegistrado(cenario.comarcaId());
@@ -292,7 +321,7 @@ class FluxoOperacionalIntegrationTest {
         submeterEConcluirOs(os, cenario.projetoId());
         MaterialItem consumo = itemDaOr(ordemRetirada, cenario.consumoId());
         comarcaService.atualizarQuantidadeAuditada(consumo.getId(), BigDecimal.valueOf(2));
-        comarcaService.homologarAsBuilt(cenario.comarcaId());
+        comarcaService.homologarAsBuilt(cenario.comarcaId(), null);
         comarcaService.salvarViradaRede(
                 cenario.comarcaId(), "/uploads/comarcas/virada-rede/prova.png",
                 "Conectividade validada", true);

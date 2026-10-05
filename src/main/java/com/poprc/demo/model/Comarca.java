@@ -62,6 +62,9 @@ public class Comarca {
     @Column(name = "as_built_status")
     private String asBuiltStatus = "PENDENTE";
 
+    @Column(name = "as_built_homologacao_legada_sem_justificativa", nullable = false)
+    private Boolean asBuiltHomologacaoLegadaSemJustificativa = false;
+
     @Column(columnDefinition = "TEXT")
     private String viradaRedeProvasFuncionamento;
 

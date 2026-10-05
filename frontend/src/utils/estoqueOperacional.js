@@ -1,3 +1,5 @@
+import { custoPlanilhaParaEstoque, ehCaboEmBobina305 } from "./planilhaEstoque.js";
+
 const numero = (valor) => {
   const convertido = Number(valor || 0);
   return Number.isFinite(convertido) ? convertido : 0;
@@ -11,6 +13,19 @@ const normalizar = (valor) => String(valor || "")
 
 const controlaSaldoFracionado = (material) =>
   ["FRACIONADO", "METRAGEM", "BOBINA", "ROLO"].includes(material?.tipoControle);
+
+const arredondarCentavos = (valor) => {
+  const absoluto = Math.abs(numero(valor));
+  return Math.sign(valor) * Math.round((absoluto + Number.EPSILON) * 100) / 100;
+};
+
+const custoInicial = (material) => {
+  const custo = numero(material?.custoMedio);
+  if (material?.tipoControle === "FRACIONADO" && ehCaboEmBobina305(material.nome)) {
+    return custoPlanilhaParaEstoque(material.nome, custo);
+  }
+  return custo;
+};
 
 export const saldoDisponivelMaterial = (material) => {
   if (!material) return 0;
@@ -40,7 +55,7 @@ export const calcularSimulacaoRetirada = (materiais, solicitacoes) => {
         saldoAtual,
         saldoProjetado,
         quantidadeFaltante: Math.max(0, -saldoProjetado),
-        valorSolicitado: quantidade * custoUnitario,
+        valorSolicitado: arredondarCentavos(quantidade * custoUnitario),
       };
     })
     .filter(Boolean);
@@ -50,7 +65,9 @@ export const calcularSimulacaoRetirada = (materiais, solicitacoes) => {
     possuiFalta: itens.some((item) => item.quantidadeFaltante > 0),
     quantidadeSolicitada: itens.reduce((total, item) => total + item.quantidade, 0),
     quantidadeFaltante: itens.reduce((total, item) => total + item.quantidadeFaltante, 0),
-    valorSolicitado: itens.reduce((total, item) => total + item.valorSolicitado, 0),
+    valorSolicitado: arredondarCentavos(
+      itens.reduce((total, item) => total + item.valorSolicitado, 0),
+    ),
   };
 };
 
@@ -89,7 +106,7 @@ const adicionarQuantidade = (resumo, material, nome, retirada, devolvida, numero
     retirada: 0,
     devolvida: 0,
     faltante: 0,
-    custoUnitario: numero(material?.custoMedio),
+    custoUnitario: custoInicial(material),
     ordens: new Set(),
   };
   item.retirada += numero(retirada);
@@ -106,11 +123,11 @@ const enriquecerAuditoria = (resumo, retirada, material) => {
     retirada: 0,
     devolvida: 0,
     faltante: 0,
-    custoUnitario: numero(retirada.custoUnitario || material?.custoMedio),
+    custoUnitario: numero(retirada.custoUnitario ?? custoInicial(material)),
     ordens: new Set(),
   };
   item.faltante = Math.max(item.faltante, numero(retirada.quantidadeFaltante));
-  item.custoUnitario = numero(retirada.custoUnitario || item.custoUnitario);
+  item.custoUnitario = numero(retirada.custoUnitario ?? item.custoUnitario);
   resumo.itens.set(chave, item);
   if (retirada.aba) resumo.abasOrigem?.add(retirada.aba);
 };
@@ -120,6 +137,9 @@ const finalizarResumo = (resumo) => {
     .map((item) => ({
       ...item,
       saldoLiquido: item.retirada - item.devolvida,
+      valorAtribuido: item.valorAtribuido ?? arredondarCentavos(
+        (item.retirada - item.devolvida) * numero(item.custoUnitario),
+      ),
       ordens: [...item.ordens],
     }))
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
@@ -130,10 +150,10 @@ const finalizarResumo = (resumo) => {
     totalRetirado: itens.reduce((total, item) => total + item.retirada, 0),
     totalDevolvido: itens.reduce((total, item) => total + item.devolvida, 0),
     totalFaltante: itens.reduce((total, item) => total + item.faltante, 0),
-    valorLiquido: itens.reduce(
-      (total, item) => total + item.saldoLiquido * numero(item.custoUnitario),
+    valorLiquido: arredondarCentavos(itens.reduce(
+      (total, item) => total + item.valorAtribuido,
       0,
-    ),
+    )),
   };
 };
 
@@ -229,6 +249,9 @@ export const consolidarRetiradasPorObra = ({
           const consolidado = resumoObra.itens.get(chave);
           consolidado.faltante += item.faltante;
           consolidado.custoUnitario = item.custoUnitario;
+          consolidado.valorAtribuido = arredondarCentavos(
+            numero(consolidado.valorAtribuido) + item.valorAtribuido,
+          );
         });
       });
       return {
