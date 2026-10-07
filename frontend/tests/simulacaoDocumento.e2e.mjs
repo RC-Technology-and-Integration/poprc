@@ -62,7 +62,9 @@ test('nova OS fictícia captura TESTE nos documentos, vistoria, retirada e devol
   const assinarDocumento = async (tipo) => {
     for (let i=0; i<3; i++) {
       await documento.getByRole('button', {name:'Assinar TESTE',exact:true}).first().click();
-      const modal = page.getByRole('dialog').last();
+      // Localizador estável: .last() passaria a apontar para o documento quando
+      // o modal de assinatura fecha, produzindo uma falsa falha de fechamento.
+      const modal = page.getByRole('dialog').filter({ hasText: /Desenhe a palavra TESTE/ });
       await expect(modal.getByRole('button',{name:'Confirmar',exact:true})).toBeDisabled();
       await expect(modal.getByText(/Desenhe a palavra TESTE/)).toBeVisible();
       const captured = await desenharTeste(page, modal.locator('canvas'), i*3);
