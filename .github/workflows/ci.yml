@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18
+        image: postgres:16
         env:
           POSTGRES_DB: poprc_test
           POSTGRES_USER: postgres
@@ -75,6 +75,9 @@ jobs:
 
       - name: Validar scripts de implantacao
         run: bash -n deploy/scripts/*.sh
+
+      - name: Validar migracoes V1-V39 e V38-V39 no PostgreSQL 16
+        run: ./mvnw --batch-mode -Dpoprc.pg16.migration=true -Dtest=Postgres16MigrationCiTest test
 
       - name: Executar testes
         run: ./mvnw --batch-mode test

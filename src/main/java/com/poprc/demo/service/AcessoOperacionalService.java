@@ -8,6 +8,7 @@ import com.poprc.demo.repository.ComarcaRepository;
 import com.poprc.demo.repository.EvidenciaFotoRepository;
 import com.poprc.demo.repository.OrdemServicoRepository;
 import com.poprc.demo.repository.OrdemRetiradaRepository;
+import com.poprc.demo.repository.MaterialItemRepository;
 import com.poprc.demo.repository.ProjetoMembroRepository;
 import com.poprc.demo.repository.ProjetoRepository;
 import com.poprc.demo.security.UsuarioAutenticado;
@@ -30,6 +31,7 @@ public class AcessoOperacionalService {
     private final ComarcaRepository comarcaRepository;
     private final OrdemRetiradaRepository ordemRetiradaRepository;
     private final EvidenciaFotoRepository evidenciaFotoRepository;
+    private final MaterialItemRepository materialItemRepository;
 
     @Transactional(readOnly = true)
     public List<OrdemServico> filtrarOrdensPermitidas(
@@ -76,6 +78,16 @@ public class AcessoOperacionalService {
         Comarca comarca = comarcaRepository.findById(comarcaId)
                 .orElseThrow(() -> new IllegalArgumentException("Obra não encontrada."));
         garantirAcessoProjeto(comarca.getProjeto() != null ? comarca.getProjeto().getId() : null, usuario);
+    }
+
+    @Transactional(readOnly = true)
+    public void garantirAcessoMaterialPrevisto(Long materialItemId, Authentication authentication) {
+        UsuarioAutenticado usuario = tecnico(authentication);
+        if (usuario == null) return;
+        var material = materialItemRepository.findById(materialItemId)
+                .orElseThrow(() -> new IllegalArgumentException("Material previsto não encontrado."));
+        garantirAcessoProjeto(material.getComarca() != null && material.getComarca().getProjeto() != null
+                ? material.getComarca().getProjeto().getId() : null, usuario);
     }
 
     @Transactional(readOnly = true)

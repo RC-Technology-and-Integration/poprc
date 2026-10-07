@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.poprc.demo.model.Contrato;
 import com.poprc.demo.model.Projeto;
 import com.poprc.demo.repository.ContratoRepository;
+import com.poprc.demo.repository.ComarcaRepository;
 import com.poprc.demo.repository.FuncionarioRepository;
 import com.poprc.demo.repository.ProjetoRepository;
 import com.poprc.demo.service.ArquivamentoService;
@@ -47,6 +48,7 @@ class ProjetoControllerTest {
 
         controller = new ProjetoController(
                 projetoRepository,
+                mock(ComarcaRepository.class),
                 contratoRepository,
                 comarcaService,
                 funcionarioRepository,

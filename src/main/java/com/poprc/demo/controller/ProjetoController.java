@@ -6,15 +6,18 @@ import com.poprc.demo.model.Projeto;
 import com.poprc.demo.model.Contrato;
 import com.poprc.demo.model.ProjetoStatus;
 import com.poprc.demo.repository.ProjetoRepository;
+import com.poprc.demo.repository.ComarcaRepository;
 import com.poprc.demo.repository.ContratoRepository;
 import com.poprc.demo.repository.FuncionarioRepository;
 import com.poprc.demo.service.ComarcaService;
 import com.poprc.demo.service.ArquivamentoService;
 import com.poprc.demo.service.ProjetoEquipeService;
+import com.poprc.demo.security.UsuarioAutenticado;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.core.Authentication;
 
 import java.util.HashMap;
 import java.util.List;
@@ -27,16 +30,19 @@ import java.util.stream.Collectors;
 public class ProjetoController {
 
     private final ProjetoRepository projetoRepository;
+    private final ComarcaRepository comarcaRepository;
     private final ContratoRepository contratoRepository;
     private final ComarcaService comarcaService;
     private final FuncionarioRepository funcionarioRepository;
     private final ArquivamentoService arquivamentoService;
     private final ProjetoEquipeService projetoEquipeService;
 
-    public ProjetoController(ProjetoRepository projetoRepository, ContratoRepository contratoRepository,
+    public ProjetoController(ProjetoRepository projetoRepository, ComarcaRepository comarcaRepository,
+            ContratoRepository contratoRepository,
             ComarcaService comarcaService, FuncionarioRepository funcionarioRepository,
             ArquivamentoService arquivamentoService, ProjetoEquipeService projetoEquipeService) {
         this.projetoRepository = projetoRepository;
+        this.comarcaRepository = comarcaRepository;
         this.contratoRepository = contratoRepository;
         this.comarcaService = comarcaService;
         this.funcionarioRepository = funcionarioRepository;
@@ -255,13 +261,26 @@ public class ProjetoController {
 
     @PutMapping("/{id}/as-built/homologar")
     @Transactional
-    public ResponseEntity<Map<String, String>> homologarAsBuilt(@PathVariable Long id) {
+    public ResponseEntity<Map<String, String>> homologarAsBuilt(@PathVariable Long id,
+            Authentication authentication) {
         Optional<Projeto> projetoOpt = projetoRepository.findById(id);
         if (!projetoOpt.isPresent()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
         Projeto projeto = projetoOpt.get();
+        var comarca = comarcaRepository.findByProjetoId(id);
+        if (comarca.isPresent()) {
+            String responsavel = authentication == null ? "Auditoria de Retirada/Devolução" : authentication.getName();
+            if (authentication != null && authentication.getPrincipal() instanceof UsuarioAutenticado usuario) {
+                responsavel = usuario.getNome();
+            }
+            Map<String, Object> auditoria = comarcaService.homologarAsBuilt(
+                    comarca.get().getId(), null, responsavel);
+            return ResponseEntity.ok(Map.of(
+                    "status", auditoria.get("asBuiltStatus").toString(),
+                    "mensagem", "As-Built homologado na auditoria da comarca."));
+        }
         projeto.setAsBuiltStatus("HOMOLOGADO");
         projetoRepository.save(projeto);
 

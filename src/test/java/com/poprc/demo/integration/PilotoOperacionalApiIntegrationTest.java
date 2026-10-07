@@ -186,8 +186,41 @@ class PilotoOperacionalApiIntegrationTest {
                     .param("quantidadeAuditada", Integer.toString(2 - devolvida)));
         }
         String statusAsBuilt = devolvida == 0 ? "HOMOLOGADO" : "HOMOLOGADO_COM_DIVERGENCIA";
-        assertThat(json(sessaoAdmin, patch("/api/comarcas/{id}/as-built/homologar", comarcaId), Map.of())
-                .path("asBuiltStatus").asText()).isEqualTo(statusAsBuilt);
+        if (devolvida > 0) {
+            for (String corpo : List.of("{}", "{\"justificativa\":null}",
+                    "{\"justificativa\":\"\"}", "{\"justificativa\":\"   \"}")) {
+                mvc.perform(patch("/api/comarcas/{id}/as-built/homologar", comarcaId)
+                        .cookie(sessaoAdmin.cookie(), sessaoAdmin.csrf())
+                        .header("X-XSRF-TOKEN", sessaoAdmin.csrf().getValue())
+                        .contentType(MediaType.APPLICATION_JSON).content(corpo))
+                        .andExpect(status().isBadRequest());
+                entityManager.clear();
+                assertThat(comarcas.findById(comarcaId).orElseThrow().getAsBuiltStatus())
+                        .isEqualTo("DIVERGENTE");
+                assertThat(ordens.findById(osId).orElseThrow().getStatus())
+                        .isEqualTo(StatusOS.AGUARDANDO_AUDITORIA);
+                assertThat(json(sessaoAdmin, get("/api/comarcas/{id}/auditoria", comarcaId)
+                        ).path("homologacoes").size()).isZero();
+            }
+            mvc.perform(put("/api/projetos/{id}/as-built/homologar", projetoId)
+                    .cookie(sessaoAdmin.cookie(), sessaoAdmin.csrf())
+                    .header("X-XSRF-TOKEN", sessaoAdmin.csrf().getValue()))
+                    .andExpect(status().isBadRequest());
+            entityManager.clear();
+            assertThat(comarcas.findById(comarcaId).orElseThrow().getAsBuiltStatus())
+                    .isEqualTo("DIVERGENTE");
+        }
+        Map<String, String> pedidoHomologacao = devolvida == 0 ? Map.of()
+                : Map.of("justificativa", "  Consumo inferior ao previsto no piloto  ");
+        JsonNode homologacao = json(sessaoAdmin,
+                patch("/api/comarcas/{id}/as-built/homologar", comarcaId), pedidoHomologacao);
+        assertThat(homologacao.path("asBuiltStatus").asText()).isEqualTo(statusAsBuilt);
+        JsonNode consultaHomologacao = json(sessaoAdmin, get("/api/comarcas/{id}/auditoria", comarcaId));
+        assertThat(consultaHomologacao.path("homologacoes").size()).isEqualTo(1);
+        assertThat(consultaHomologacao.path("homologacoes").get(0).path("justificativa").asText())
+                .isEqualTo(devolvida == 0 ? "" : "Consumo inferior ao previsto no piloto");
+        assertThat(consultaHomologacao.path("homologacoes").get(0).path("responsavel").asText())
+                .isEqualTo(admin.getNome());
         long documentoId = assinarDocumento(sessaoAdmin, comarcaId, "ENCERRAMENTO_OS", assinatura);
         JsonNode encerramento = json(sessaoAdmin, patch("/api/comarcas/{id}/concluir", comarcaId),
                 Map.of("concluidaPor", admin.getNome()));

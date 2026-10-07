@@ -3,6 +3,7 @@ package com.poprc.demo.service;
 import com.poprc.demo.exception.ArquivoInvalidoException;
 import com.poprc.demo.exception.SaldoInsuficienteException;
 import com.poprc.demo.model.Comarca;
+import com.poprc.demo.model.HistoricoHomologacaoAsBuilt;
 import com.poprc.demo.model.Material;
 import com.poprc.demo.model.MaterialItem;
 import com.poprc.demo.model.MovimentacaoEstoque;
@@ -13,6 +14,7 @@ import com.poprc.demo.model.ProjetoStatus;
 import com.poprc.demo.model.StatusOS;
 import com.poprc.demo.model.TipoMovimentacao;
 import com.poprc.demo.repository.ComarcaRepository;
+import com.poprc.demo.repository.HistoricoHomologacaoAsBuiltRepository;
 import com.poprc.demo.repository.MaterialItemRepository;
 import com.poprc.demo.repository.MaterialRepository;
 import com.poprc.demo.repository.MovimentacaoEstoqueRepository;
@@ -20,6 +22,8 @@ import com.poprc.demo.repository.DocumentoInternoRepository;
 import com.poprc.demo.repository.OrdemRetiradaRepository;
 import com.poprc.demo.repository.ProjetoRepository;
 import com.poprc.demo.storage.UploadStorage;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -59,6 +63,7 @@ public class ComarcaService {
     private static final String OBRA_CONCLUIDA = "CONCLUIDA";
 
     private final ComarcaRepository comarcaRepository;
+    private final HistoricoHomologacaoAsBuiltRepository historicoHomologacaoAsBuiltRepository;
     private final MaterialItemRepository materialItemRepository;
     private final MaterialRepository materialRepository;
     private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
@@ -68,8 +73,18 @@ public class ComarcaService {
     private final FluxoOrdemServicoService fluxoOrdemServicoService;
     private final SaldoLocalService saldoLocalService;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     public Optional<Comarca> obterPorId(Long id) {
         return comarcaRepository.findById(id);
+    }
+
+    private Optional<Comarca> buscarComarcaTravada(Long id) {
+        Optional<Comarca> comarca = comarcaRepository.findByIdForUpdate(id);
+        // A leitura de autorização pode ter carregado a entidade no mesmo EntityManager.
+        comarca.ifPresent(entityManager::refresh);
+        return comarca;
     }
 
     @Transactional(readOnly = true)
@@ -92,10 +107,19 @@ public class ComarcaService {
                 "/uploads/comarcas/virada-rede/");
     }
 
+    @Transactional
     public Comarca atualizarProgresso(Long id, BigDecimal percentualConcluido, String situacao) {
-        Optional<Comarca> comarcaOpt = comarcaRepository.findById(id);
+        Optional<Comarca> comarcaOpt = buscarComarcaTravada(id);
         if (comarcaOpt.isPresent()) {
             Comarca comarca = comarcaOpt.get();
+            if (situacao != null && ((OBRA_CONCLUIDA.equals(situacao)
+                    && (!OBRA_CONCLUIDA.equals(comarca.getSituacao())
+                            || comarca.getDataConclusao() == null))
+                    || (OBRA_CONCLUIDA.equals(comarca.getSituacao())
+                            && !OBRA_CONCLUIDA.equals(situacao)))) {
+                throw new IllegalStateException(
+                        "A situação de obra concluída só pode ser alterada pelo encerramento formal.");
+            }
             if (percentualConcluido != null) {
                 comarca.setPercentualConcluido(percentualConcluido);
             }
@@ -338,16 +362,16 @@ public class ComarcaService {
 
         MaterialItem material = materialItemRepository.findById(materialId)
                 .orElseThrow(() -> new IllegalArgumentException("Material da comarca não encontrado."));
+        Comarca comarca = buscarComarcaTravada(material.getComarca().getId())
+                .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
+        validarAsBuiltAbertoParaMateriais(comarca);
+        entityManager.refresh(material);
         validarEscalaQuantidade(material.getMaterial(), quantidadeAuditada);
-        Comarca comarca = material.getComarca();
-        if (AS_BUILT_HOMOLOGADO.equals(comarca.getAsBuiltStatus())
-                || AS_BUILT_HOMOLOGADO_COM_DIVERGENCIA.equals(comarca.getAsBuiltStatus())) {
-            throw new IllegalArgumentException("Reabra o As-Built antes de alterar a quantidade auditada.");
-        }
 
         material.setQuantidadeAuditada(quantidadeAuditada);
         MaterialItem materialSalvo = materialItemRepository.save(material);
         sincronizarStatusAsBuilt(comarca);
+        entityManager.flush();
         return montarMaterialAuditoria(materialSalvo);
     }
 
@@ -362,8 +386,9 @@ public class ComarcaService {
     public Comarca adicionarMaterialPrevisto(Long comarcaId, Long materialId, String nomeMaterial, BigDecimal quantidadePrevista) {
         validarMaterialPrevisto(nomeMaterial, quantidadePrevista);
 
-        Comarca comarca = comarcaRepository.findById(comarcaId)
+        Comarca comarca = buscarComarcaTravada(comarcaId)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
+        validarAsBuiltAbertoParaMateriais(comarca);
         Material materialEstoque = obterMaterialEstoque(materialId);
         validarEscalaQuantidade(materialEstoque, quantidadePrevista);
         validarSaldoReserva(materialEstoque, quantidadePrevista, BigDecimal.ZERO);
@@ -391,11 +416,13 @@ public class ComarcaService {
 
         MaterialItem material = materialItemRepository.findById(materialItemId)
                 .orElseThrow(() -> new IllegalArgumentException("Material previsto não encontrado."));
+        Comarca comarca = buscarComarcaTravada(material.getComarca().getId())
+                .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
+        validarAsBuiltAbertoParaMateriais(comarca);
+        entityManager.refresh(material);
         if (Boolean.TRUE.equals(material.getEstoqueBaixado())) {
             throw new IllegalArgumentException("Material já baixado no estoque não pode ser alterado.");
         }
-
-        Comarca comarca = material.getComarca();
         liberarReservaEstoque(comarca, material, material.getQuantidadePrevista());
 
         Material materialEstoque = obterMaterialEstoque(materialId);
@@ -416,8 +443,9 @@ public class ComarcaService {
     @Transactional
     public Comarca atualizarMateriaisFaltantes(Long comarcaId, Boolean faltouMaterial, List<Long> materialItemIds,
             String descricao) {
-        Comarca comarca = comarcaRepository.findById(comarcaId)
+        Comarca comarca = buscarComarcaTravada(comarcaId)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
+        validarAsBuiltAbertoParaMateriais(comarca);
 
         boolean marcouFalta = Boolean.TRUE.equals(faltouMaterial);
         if (marcouFalta && (descricao == null || descricao.isBlank())) {
@@ -425,6 +453,7 @@ public class ComarcaService {
         }
 
         List<MaterialItem> materiais = materiaisDaComarca(comarca);
+        materiais.forEach(entityManager::refresh);
         Set<Long> idsSelecionados = materialItemIds == null
                 ? Set.of()
                 : materialItemIds.stream().collect(Collectors.toSet());
@@ -451,15 +480,18 @@ public class ComarcaService {
         } else if (descricaoAnterior != null && descricaoAnterior.equals(comarca.getPendencias())) {
             comarca.setPendencias(null);
         }
-        return comarcaRepository.save(comarca);
+        Comarca salva = comarcaRepository.save(comarca);
+        entityManager.flush();
+        return salva;
     }
 
     @Transactional
     public Comarca adicionarItemAdicional(Long comarcaId, Long materialId, String nomeMaterial, BigDecimal quantidadePrevista) {
         validarMaterialPrevisto(nomeMaterial, quantidadePrevista);
 
-        Comarca comarca = comarcaRepository.findById(comarcaId)
+        Comarca comarca = buscarComarcaTravada(comarcaId)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
+        validarAsBuiltAbertoParaMateriais(comarca);
         Material materialEstoque = obterMaterialEstoque(materialId);
         validarEscalaQuantidade(materialEstoque, quantidadePrevista);
         validarSaldoReserva(materialEstoque, quantidadePrevista, BigDecimal.ZERO);
@@ -486,11 +518,16 @@ public class ComarcaService {
 
         MaterialItem material = materialItemRepository.findById(materialItemId)
                 .orElseThrow(() -> new IllegalArgumentException("Material previsto não encontrado."));
+        Comarca comarca = buscarComarcaTravada(material.getComarca().getId())
+                .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
+        validarAsBuiltAbertoParaMateriais(comarca);
+        entityManager.refresh(material);
         material.setDataHoraSolicitacao(dataHoraSolicitacao);
         material.setDataHoraRetirada(dataHoraRetirada);
         material.setDataHoraUso(dataHoraUso);
-        MaterialItem materialSalvo = materialItemRepository.save(material);
-        return recarregarComarca(materialSalvo.getComarca().getId());
+        materialItemRepository.save(material);
+        entityManager.flush();
+        return recarregarComarca(comarca.getId());
     }
 
     private void validarOrdemTimeline(LocalDateTime dataHoraSolicitacao, LocalDateTime dataHoraRetirada,
@@ -511,10 +548,13 @@ public class ComarcaService {
     public Comarca removerMaterialPrevisto(Long materialId) {
         MaterialItem material = materialItemRepository.findById(materialId)
                 .orElseThrow(() -> new IllegalArgumentException("Material previsto não encontrado."));
+        Comarca comarca = buscarComarcaTravada(material.getComarca().getId())
+                .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
+        validarAsBuiltAbertoParaMateriais(comarca);
+        entityManager.refresh(material);
         if (Boolean.TRUE.equals(material.getEstoqueBaixado())) {
             throw new IllegalArgumentException("Material já baixado no estoque não pode ser removido.");
         }
-        Comarca comarca = material.getComarca();
         Long comarcaId = comarca.getId();
         liberarReservaEstoque(comarca, material, material.getQuantidadePrevista());
 
@@ -529,22 +569,44 @@ public class ComarcaService {
     }
 
     @Transactional
-    public Map<String, Object> homologarAsBuilt(Long id) {
-        Comarca comarca = comarcaRepository.findById(id)
+    public Map<String, Object> homologarAsBuilt(Long id, String justificativa) {
+        return homologarAsBuilt(id, justificativa, "Auditoria de Retirada/Devolução");
+    }
+
+    @Transactional
+    public Map<String, Object> homologarAsBuilt(Long id, String justificativa, String responsavel) {
+        // Preserva alterações pendentes na transação antes de atualizar a entidade bloqueada.
+        entityManager.flush();
+        Comarca comarca = buscarComarcaTravada(id)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
+        if (AS_BUILT_HOMOLOGADO.equals(comarca.getAsBuiltStatus())
+                || AS_BUILT_HOMOLOGADO_COM_DIVERGENCIA.equals(comarca.getAsBuiltStatus())) {
+            throw new IllegalStateException("Reabra o As-Built antes de registrar outra homologação.");
+        }
         List<MaterialItem> materiais = materiaisDaComarca(comarca);
+        materiais.forEach(entityManager::refresh);
 
         if (materiais.isEmpty()) {
             throw new IllegalArgumentException("Não há materiais previstos para homologar o As-Built desta comarca.");
         }
 
         boolean conciliado = materiaisConciliados(materiais);
+        if (!conciliado && (justificativa == null || justificativa.isBlank())) {
+            throw new IllegalArgumentException("Informe a justificativa para homologar o As-Built com divergência.");
+        }
         validarMateriaisVinculadosAoEstoque(materiais);
         validarConsolidacaoFisicaDaOr(comarca, materiais);
 
         comarca.setAsBuiltStatus(conciliado ? AS_BUILT_HOMOLOGADO : AS_BUILT_HOMOLOGADO_COM_DIVERGENCIA);
         comarca.setSituacao(conciliado ? "AS_BUILT_HOMOLOGADO" : "AS_BUILT_HOMOLOGADO_COM_DIVERGENCIA");
         Comarca comarcaSalva = comarcaRepository.save(comarca);
+        HistoricoHomologacaoAsBuilt homologacao = new HistoricoHomologacaoAsBuilt();
+        homologacao.setComarca(comarcaSalva);
+        homologacao.setStatus(comarcaSalva.getAsBuiltStatus());
+        homologacao.setJustificativa(conciliado ? null : justificativa.trim());
+        homologacao.setResponsavel(responsavel);
+        homologacao.setRegistradoEm(LocalDateTime.now());
+        historicoHomologacaoAsBuiltRepository.save(homologacao);
         sincronizarAsBuiltDoProjeto(comarcaSalva);
         if (comarcaSalva.getOrdemServico() != null) {
             fluxoOrdemServicoService.registrarAsBuiltHomologado(
@@ -555,7 +617,7 @@ public class ComarcaService {
 
     @Transactional
     public EncerramentoObraResultado concluirObra(Long id, String concluidaPor) {
-        Comarca comarca = comarcaRepository.findById(id)
+        Comarca comarca = buscarComarcaTravada(id)
                 .orElseThrow(() -> new IllegalArgumentException("Obra não encontrada."));
 
         if (OBRA_CONCLUIDA.equals(comarca.getSituacao()) && comarca.getDataConclusao() != null) {
@@ -626,7 +688,7 @@ public class ComarcaService {
 
     @Transactional
     public Map<String, Object> reabrirAsBuilt(Long id) {
-        Comarca comarca = comarcaRepository.findById(id)
+        Comarca comarca = buscarComarcaTravada(id)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
 
         if (OBRA_CONCLUIDA.equals(comarca.getSituacao())) {
@@ -636,6 +698,11 @@ public class ComarcaService {
         if (!AS_BUILT_HOMOLOGADO.equals(comarca.getAsBuiltStatus())
                 && !AS_BUILT_HOMOLOGADO_COM_DIVERGENCIA.equals(comarca.getAsBuiltStatus())) {
             throw new IllegalArgumentException("Somente As-Built homologado pode ser reaberto para ajuste.");
+        }
+
+        if (AS_BUILT_HOMOLOGADO_COM_DIVERGENCIA.equals(comarca.getAsBuiltStatus())
+                && historicoHomologacaoAsBuiltRepository.findByComarcaIdOrderByIdDesc(id).isEmpty()) {
+            comarca.setAsBuiltHomologacaoLegadaSemJustificativa(true);
         }
 
         comarca.setAsBuiltStatus(AS_BUILT_REABERTO);
@@ -725,6 +792,18 @@ public class ComarcaService {
         response.put("etapaAtual", comarca.getEtapaAtual());
         response.put("conciliado", conciliado);
         response.put("asBuiltStatus", resolverStatusAsBuilt(comarca, conciliado, !materiais.isEmpty()));
+        List<HistoricoHomologacaoAsBuilt> homologacoes = historicoHomologacaoAsBuiltRepository
+                .findByComarcaIdOrderByIdDesc(comarca.getId());
+        response.put("homologacoes", homologacoes.stream().map(item -> Map.of(
+                "id", item.getId(),
+                "status", item.getStatus(),
+                "justificativa", item.getJustificativa() == null ? "" : item.getJustificativa(),
+                "responsavel", item.getResponsavel(),
+                "registradoEm", item.getRegistradoEm())).toList());
+        response.put("homologacaoLegadaSemJustificativa",
+                Boolean.TRUE.equals(comarca.getAsBuiltHomologacaoLegadaSemJustificativa())
+                        || (AS_BUILT_HOMOLOGADO_COM_DIVERGENCIA.equals(comarca.getAsBuiltStatus())
+                                && homologacoes.isEmpty()));
         response.put("materiais", materiais.stream().map(this::montarMaterialAuditoria).toList());
 
         return response;
@@ -1129,6 +1208,13 @@ public class ComarcaService {
             comarca.setAsBuiltStatus(AS_BUILT_PENDENTE);
         }
         comarcaRepository.save(comarca);
+    }
+
+    private void validarAsBuiltAbertoParaMateriais(Comarca comarca) {
+        if (AS_BUILT_HOMOLOGADO.equals(comarca.getAsBuiltStatus())
+                || AS_BUILT_HOMOLOGADO_COM_DIVERGENCIA.equals(comarca.getAsBuiltStatus())) {
+            throw new IllegalArgumentException("Reabra o As-Built antes de alterar materiais da obra.");
+        }
     }
 
     private String resolverStatusAsBuilt(Comarca comarca, boolean conciliado, boolean temMateriais) {

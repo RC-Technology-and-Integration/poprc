@@ -12,6 +12,7 @@ import com.poprc.demo.model.Projeto;
 import com.poprc.demo.model.ProjetoMembro;
 import com.poprc.demo.repository.ComarcaRepository;
 import com.poprc.demo.repository.EvidenciaFotoRepository;
+import com.poprc.demo.repository.MaterialItemRepository;
 import com.poprc.demo.repository.OrdemServicoRepository;
 import com.poprc.demo.repository.OrdemRetiradaRepository;
 import com.poprc.demo.repository.ProjetoMembroRepository;
@@ -47,7 +48,8 @@ class AcessoOperacionalServiceTest {
                 ordemServicoRepository,
                 mock(ComarcaRepository.class),
                 ordemRetiradaRepository,
-                evidenciaFotoRepository);
+                evidenciaFotoRepository,
+                mock(MaterialItemRepository.class));
     }
 
     @Test

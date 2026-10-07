@@ -37,6 +37,8 @@ rsync \
     --partial \
     --ignore-existing \
     --chmod=F600,D700 \
+    --include='/poprc-dokploy-*.tar.gz' \
+    --exclude='*' \
     -e "$SSH_COMMAND" \
     "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}" \
     "$DESTINATION/"

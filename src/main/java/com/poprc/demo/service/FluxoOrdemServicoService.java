@@ -44,6 +44,11 @@ public class FluxoOrdemServicoService {
             destino = proximoStatusAposValidacao(ordemId);
         }
         validarTransicao(atual, destino);
+        if (atual != destino && (destino == StatusOS.AGUARDANDO_ENCERRAMENTO
+                || destino == StatusOS.CONCLUIDA)) {
+            throw new IllegalStateException(
+                    "A homologação do As-Built e o encerramento da obra devem usar as operações formais.");
+        }
         validarRequisitos(ordem, destino);
         return aplicar(ordem, destino, eventoUsuario(atual, destino), responsavel);
     }
@@ -165,6 +170,11 @@ public class FluxoOrdemServicoService {
     }
 
     private void validarRequisitos(OrdemServico ordem, StatusOS destino) {
+        if (destino == StatusOS.AGUARDANDO_AUDITORIA
+                && !todasOrdensRetiradaDevolvidas(ordem.getId())) {
+            throw new IllegalStateException(
+                    "Todas as Ordens de Retirada precisam estar devolvidas antes da auditoria.");
+        }
         if (destino == StatusOS.AGUARDANDO_VALIDACAO) {
             if (ordem.getChecklist() == null || ordem.getChecklist().isBlank()
                     || ordem.getChecklist().matches("(?s).*\"atividades\"\\s*:\\s*\\[\\s*].*")) {

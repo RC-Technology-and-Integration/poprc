@@ -3802,9 +3802,7 @@ export default function PainelEstoque() {
                       {item.faltante > 0 ? formatarNumero(item.faltante) : "—"}
                     </td>
                     <td className="px-5 py-3 text-right font-bold text-slate-900">
-                      {formatarMoeda(
-                        item.saldoLiquido * getCustoUnitarioExibido(item.material),
-                      )}
+                      {formatarMoeda(item.valorAtribuido)}
                     </td>
                   </tr>
                 ))}
