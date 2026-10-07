@@ -1,3 +1,4 @@
+import { MARCA_SIMULACAO } from "../utils/simulacaoDocumento";
 import { Fragment, useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus,
@@ -128,7 +129,7 @@ const novaLinhaSimulacao = () => ({
   quantidade: "",
 });
 
-function SignatureBox({ label, value, onChange }) {
+function SignatureBox({ label, value, onChange, simulacao = false }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
 
@@ -204,9 +205,10 @@ function SignatureBox({ label, value, onChange }) {
 
   return (
     <div className="space-y-2">
+      {simulacao && <p className="text-xs font-bold text-red-700">Desenhe TESTE; não use assinatura real.</p>}
       <div className="flex items-center justify-between gap-2">
         <label className="block text-sm font-semibold text-slate-700">
-          {label}
+          {simulacao ? label.replace("desenhada", "fictícia") + " — TESTE" : label}
         </label>
         <button
           type="button"
@@ -1788,12 +1790,12 @@ export default function PainelEstoque() {
     setOrdemRetiradaAtual(ordemRetirada);
     setAcaoOr(acao);
     setOrForm({
-      conferidoPor: "",
-      levadoPor: "",
+      conferidoPor: ordemRetirada.simulacao ? "TESTE FICTÍCIO — CONFERENTE" : "",
+      levadoPor: ordemRetirada.simulacao ? "TESTE FICTÍCIO — RETIRANTE" : "",
       assinaturaConferente: "",
       assinaturaRetirante: "",
-      devolvidoPor: "",
-      recebidoPor: "",
+      devolvidoPor: ordemRetirada.simulacao ? "TESTE FICTÍCIO — DEVOLUÇÃO" : "",
+      recebidoPor: ordemRetirada.simulacao ? "TESTE FICTÍCIO — RECEBIMENTO" : "",
       assinaturaRecebimento: "",
       devolucoes: Object.fromEntries(
         (ordemRetirada.itens || []).map((item) => [
@@ -6616,6 +6618,8 @@ export default function PainelEstoque() {
         title={`${acaoOr === "retirada" ? "Executar Retirada" : "Registrar Devolução"} - ${ordemRetiradaAtual?.numeroOr || ""}`}
       >
         <form onSubmit={handleSubmitOr} className="space-y-4">
+          {ordemRetiradaAtual?.simulacao && <div className="rounded border-2 border-red-600 bg-red-50 p-3 text-red-800"><strong>{MARCA_SIMULACAO}</strong><p>Retirada e devolução fictícias com marcas TESTE. Conferência, alocação e retorno permanecem obrigatórios.</p></div>}
+
           {ordemRetiradaAtual && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
               <p className="font-black text-slate-800">{ordemRetiradaAtual.numeroOr}</p>
@@ -6641,6 +6645,7 @@ export default function PainelEstoque() {
                     Quem conferiu os itens *
                   </label>
                   <input
+                    readOnly={ordemRetiradaAtual?.simulacao}
                     value={orForm.conferidoPor}
                     onChange={(e) =>
                       setOrForm((prev) => ({ ...prev, conferidoPor: e.target.value }))
@@ -6654,6 +6659,7 @@ export default function PainelEstoque() {
                     Quem levou os itens *
                   </label>
                   <input
+                    readOnly={ordemRetiradaAtual?.simulacao}
                     value={orForm.levadoPor}
                     onChange={(e) =>
                       setOrForm((prev) => ({ ...prev, levadoPor: e.target.value }))
@@ -6665,6 +6671,7 @@ export default function PainelEstoque() {
               </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <SignatureBox
+                  simulacao={ordemRetiradaAtual?.simulacao}
                   label="Assinatura desenhada do conferente *"
                   value={orForm.assinaturaConferente}
                   onChange={(assinaturaConferente) =>
@@ -6672,6 +6679,7 @@ export default function PainelEstoque() {
                   }
                 />
                 <SignatureBox
+                  simulacao={ordemRetiradaAtual?.simulacao}
                   label="Assinatura desenhada de quem levou *"
                   value={orForm.assinaturaRetirante}
                   onChange={(assinaturaRetirante) =>
@@ -6783,6 +6791,7 @@ export default function PainelEstoque() {
                     Quem devolveu *
                   </label>
                   <input
+                    readOnly={ordemRetiradaAtual?.simulacao}
                     value={orForm.devolvidoPor}
                     onChange={(e) =>
                       setOrForm((prev) => ({ ...prev, devolvidoPor: e.target.value }))
@@ -6796,6 +6805,7 @@ export default function PainelEstoque() {
                     Quem conferiu/recebeu *
                   </label>
                   <input
+                    readOnly={ordemRetiradaAtual?.simulacao}
                     value={orForm.recebidoPor}
                     onChange={(e) =>
                       setOrForm((prev) => ({ ...prev, recebidoPor: e.target.value }))
@@ -6907,6 +6917,7 @@ export default function PainelEstoque() {
                 )}
               </div>
               <SignatureBox
+                simulacao={ordemRetiradaAtual?.simulacao}
                 label="Assinatura desenhada de recebimento *"
                 value={orForm.assinaturaRecebimento}
                 onChange={(assinaturaRecebimento) =>

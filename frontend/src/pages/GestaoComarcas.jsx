@@ -1,3 +1,4 @@
+import { MARCA_SIMULACAO, EMPRESA_FICTICIA, CAMPOS_IDENTIDADE_FICTICIA, camposFicticios } from "../utils/simulacaoDocumento";
 import { useState, useEffect, useRef } from "react";
 import {
   AlertTriangle,
@@ -610,6 +611,7 @@ export default function GestaoComarcas() {
       declaracaoDesignacaoData: "",
       declaracaoDesignacao: "",
       ...conteudoSalvo,
+      ...(os.simulacao ? camposFicticios() : {}),
       tipoDocumento: tipo,
     };
   };
@@ -763,14 +765,18 @@ export default function GestaoComarcas() {
     setDocumentoMensagem("Alterações ainda não salvas.");
   };
 
+  const documentoSimulacao = documentoVistoria?.documentoSalvo
+    ? documentoVistoria.documentoSalvo.simulacao === true
+    : documentoVistoria?.comarca?.ordemServico?.simulacao === true;
+
   const montarConteudoDocumentoVistoria = () => ({
     modelo:
       documentoVistoria?.tipo === DOCUMENTO_FINAL
         ? "ORDEM DE SERVIÇO - ENCERRAMENTO, ACEITE E CONFORMIDADE TÉCNICA"
         : "ORDEM DE SERVIÇO - ABERTURA E VISTORIA TÉCNICA INICIAL",
     tipoDocumento: documentoVistoria?.tipo || DOCUMENTO_INICIAL,
-    empresa: "RC TECHNOLOGY AND INTEGRATION LTDA",
-    cnpj: "33.910.895/0001-50",
+    empresa: documentoSimulacao ? EMPRESA_FICTICIA : "RC TECHNOLOGY AND INTEGRATION LTDA",
+    cnpj: documentoSimulacao ? "NÃO APLICÁVEL — EMPRESA FICTÍCIA" : "33.910.895/0001-50",
     preenchidoEm: new Date().toISOString(),
     ...documentoVistoriaForm,
   });
@@ -785,6 +791,7 @@ export default function GestaoComarcas() {
     try {
       const conteudo = montarConteudoDocumentoVistoria();
       const payload = {
+        simulacao: documentoSimulacao,
         comarcaId: documentoVistoria.comarca.id,
         tipo: documentoVistoria.tipo,
         conteudoJson: JSON.stringify(conteudo),
@@ -797,6 +804,7 @@ export default function GestaoComarcas() {
         ? await api.put(`/documentos-internos/${documentoAtual.id}/conteudo`, payload)
         : await api.post("/documentos-internos/vistoria", payload);
       setDocumentoVistoria((prev) => ({ ...prev, documentoSalvo: response.data }));
+      setDocumentoVistoriaForm(criarDocumentoVistoriaForm(documentoVistoria.comarca, documentoVistoria.tipo, lerConteudoDocumento(response.data)));
       setDocumentoAssinaturasLog([]);
       setDocumentoIntegridade(null);
       setDocumentoSujo(false);
@@ -835,6 +843,7 @@ export default function GestaoComarcas() {
 
   const imprimirDocumentoVistoria = () => {
     if (!documentoVistoriaForm) return;
+    if (documentoSimulacao) { abrirPdfServidor(); return; }
     const conteudo = montarConteudoDocumentoVistoria();
     const escaparHtml = (valor) =>
       String(valor ?? "")
@@ -2576,6 +2585,11 @@ export default function GestaoComarcas() {
       >
         {documentoVistoriaForm && (
           <div className="max-h-[76vh] space-y-5 overflow-y-auto pr-1 text-sm">
+            {documentoSimulacao && <div className="rounded border-2 border-red-600 bg-red-50 p-3 text-red-800">
+              <strong>{MARCA_SIMULACAO}</strong>
+              <p>{EMPRESA_FICTICIA}. Identidades, declarações, aceite e designação são fictícios. Cada papel registra uma marca TESTE. A impressão usa o PDF marcado do servidor.</p>
+            </div>}
+
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <p className="text-center text-base font-black text-slate-800">
                 ORDEM DE SERVIÇO (OS)
@@ -2659,7 +2673,7 @@ export default function GestaoComarcas() {
                       }`}
                     >
                       <span className="block font-black">
-                        {final ? "Encerramento" : "Vistoria inicial"} #{documento.id}
+                        {documento.simulacao ? "TESTE · " : ""}{final ? "Encerramento" : "Vistoria inicial"} #{documento.id}
                       </span>
                       <span className="mt-1 block">
                         {documento.dataGeracao
@@ -2706,19 +2720,20 @@ export default function GestaoComarcas() {
               ].map(([campo, label, type = "text"]) => (
                 <label key={campo} className="block">
                   <span className="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">
-                    {label}
+                    {documentoSimulacao ? label.replace("RC Technology", "fictício TESTE").replace("Projeto RC", "Projeto fictício TESTE") : label}
                   </span>
                   <input
                     type={type}
+                    readOnly={documentoSimulacao && (CAMPOS_IDENTIDADE_FICTICIA.includes(campo) || campo === "cpfTecnico")}
                     value={
-                      campo === "cpfTecnico"
+                      campo === "cpfTecnico" && !documentoSimulacao
                         ? formatarCpf(documentoVistoriaForm[campo])
                         : documentoVistoriaForm[campo] || ""
                     }
                     onChange={(e) =>
                       atualizarDocumentoVistoria(
                         campo,
-                        campo === "cpfTecnico"
+                        campo === "cpfTecnico" && !documentoSimulacao
                           ? formatarCpf(e.target.value)
                           : e.target.value,
                       )
@@ -2905,6 +2920,7 @@ export default function GestaoComarcas() {
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <input
                   value={documentoVistoriaForm.responsavelDesignadoNome}
+                  readOnly={documentoSimulacao}
                   onChange={(e) =>
                     atualizarDocumentoVistoria(
                       "responsavelDesignadoNome",
@@ -2916,6 +2932,7 @@ export default function GestaoComarcas() {
                 />
                 <input
                   value={documentoVistoriaForm.responsavelDesignadoCargo}
+                  readOnly={documentoSimulacao}
                   onChange={(e) =>
                     atualizarDocumentoVistoria(
                       "responsavelDesignadoCargo",
@@ -2939,6 +2956,7 @@ export default function GestaoComarcas() {
                 />
                 <input
                   value={documentoVistoriaForm.gerenteDesignanteNome}
+                  readOnly={documentoSimulacao}
                   onChange={(e) =>
                     atualizarDocumentoVistoria(
                       "gerenteDesignanteNome",
@@ -2962,7 +2980,7 @@ export default function GestaoComarcas() {
                 />
               </div>
               <p className="mt-3 text-xs text-slate-500">
-                A declaração de designação segue o texto institucional fixo do documento.
+                {documentoSimulacao ? "Designação fictícia para TESTE, sem representação ou autorização institucional." : "A declaração de designação segue o texto institucional fixo do documento."}
               </p>
             </div>
 
@@ -2976,7 +2994,7 @@ export default function GestaoComarcas() {
                   const imagem = documento?.[assinatura.campoAssinatura];
                   return (
                     <div key={assinatura.papel} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-xs font-black text-slate-700">{assinatura.label}</p>
+                      <p className="text-xs font-black text-slate-700">{documentoSimulacao ? assinatura.label.replace(/projeto RC/i, "projeto fictício") + " — TESTE" : assinatura.label}</p>
                       {imagem ? (
                         <>
                           <img
@@ -2998,11 +3016,12 @@ export default function GestaoComarcas() {
                       )}
                       {podeEditarDocumento && <button
                         type="button"
+                        disabled={documentoSimulacao && (!!imagem || documentoVistoria.documentoSalvo?.status === "INVALIDADO")}
                         onClick={() => assinarDocumentoVistoria(assinatura.papel)}
                         className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-md bg-emerald-600 px-2 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
                       >
                         <ShieldCheck size={13} />
-                        {imagem ? "Substituir" : "Assinar"}
+                        {imagem ? documentoSimulacao ? "Assinado" : "Substituir" : documentoSimulacao ? "Assinar TESTE" : "Assinar"}
                       </button>}
                     </div>
                   );
@@ -3031,7 +3050,7 @@ export default function GestaoComarcas() {
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100"
               >
                 <Printer size={16} />
-                Salvar e abrir PDF oficial
+                {documentoSimulacao ? "Salvar e abrir PDF de TESTE" : "Salvar e abrir PDF oficial"}
               </button>}
               <button
                 type="button"
@@ -3039,7 +3058,7 @@ export default function GestaoComarcas() {
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
               >
                 <Printer size={16} />
-                Pré-visualizar e imprimir
+                {documentoSimulacao ? "Pré-visualizar PDF de TESTE" : "Pré-visualizar e imprimir"}
               </button>
             </div>
           </div>
@@ -3052,6 +3071,10 @@ export default function GestaoComarcas() {
         title={`${documentoAssinaturaAtual ? ASSINATURAS_DOCUMENTO.find((item) => item.papel === papelAssinaturaAtual)?.label || "Assinar Documento" : "Coletar Assinatura"} - ${comarcaAssinaturaAtual?.nomeComarca || ""}`}
       >
         <div className="space-y-4">
+          {(documentoAssinaturaAtual?.simulacao || comarcaAssinaturaAtual?.ordemServico?.simulacao) &&
+            <p className="rounded border border-red-300 bg-red-50 p-3 font-bold text-red-800">
+              {MARCA_SIMULACAO}. Desenhe a palavra TESTE no campo abaixo. Nunca use assinatura ou identidade real.
+            </p>}
           {documentoAssinaturaAtual && (
             <label className="block">
               <span className="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">
@@ -3059,6 +3082,7 @@ export default function GestaoComarcas() {
               </span>
               <input
                 value={nomeAssinanteAtual}
+                readOnly={documentoAssinaturaAtual?.simulacao}
                 onChange={(e) => setNomeAssinanteAtual(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 placeholder="Nome completo"

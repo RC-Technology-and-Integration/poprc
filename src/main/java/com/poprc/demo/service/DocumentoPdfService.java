@@ -104,19 +104,22 @@ public class DocumentoPdfService {
             JsonNode conteudo = objectMapper.readTree(documentoInterno.getConteudoJson() == null
                     ? "{}"
                     : documentoInterno.getConteudoJson());
+            if (documentoInterno.isSimulacao()) {
+                conteudo = objectMapper.readTree(SimulacaoDocumentoService.conteudoFicticio(documentoInterno.getConteudoJson()));
+            }
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             Document pdf = new Document(PageSize.A4, 42, 42, 72, 48);
             PdfWriter writer = PdfWriter.getInstance(pdf, output);
-            writer.setPageEvent(new CabecalhoRodape(6));
+            writer.setPageEvent(new CabecalhoRodape(6, documentoInterno.isSimulacao()));
             pdf.open();
 
             adicionarCapa(pdf, conteudo, documentoInterno);
             pdf.newPage();
-            adicionarObjetoEInicio(pdf, conteudo);
+            adicionarObjetoEInicio(pdf, conteudo, documentoInterno.isSimulacao());
             pdf.newPage();
-            adicionarRackEInicioConclusao(pdf, conteudo);
+            adicionarRackEInicioConclusao(pdf, conteudo, documentoInterno.isSimulacao());
             pdf.newPage();
-            adicionarConclusaoEAceite(pdf, conteudo);
+            adicionarConclusaoEAceite(pdf, conteudo, documentoInterno.isSimulacao());
             pdf.newPage();
             adicionarSalvaguardaEAssinaturas(pdf, conteudo, documentoInterno);
             pdf.newPage();
@@ -152,11 +155,13 @@ public class DocumentoPdfService {
         adicionarCampo(identificacao, "Data e hora de início", texto(conteudo, "dataInicio", ""));
         adicionarCampo(identificacao, "Data e hora de conclusão", texto(conteudo, "dataConclusao", ""));
         adicionarCampo(identificacao, "Equipe responsável", texto(conteudo, "equipeResponsavel", ""));
-        adicionarCampo(identificacao, "Gestor RC", texto(conteudo, "gestorRc", ""));
+        adicionarCampo(identificacao, documento.isSimulacao() ? "Gestor fictício TESTE" : "Gestor RC", texto(conteudo, "gestorRc", ""));
         adicionarCampo(identificacao, "Gerente do Fórum", texto(conteudo, "gerenteForum", ""));
         pdf.add(identificacao);
 
-        adicionarAviso(pdf, "Documento gerado pelo sistema", "Este documento deve acompanhar a abertura e o encerramento da OS. Quando impresso em branco, os campos podem ser preenchidos e assinados no local.");
+        adicionarAviso(pdf, documento.isSimulacao() ? "Documento fictício de homologação" : "Documento gerado pelo sistema",
+                documento.isSimulacao() ? "Exclusivo para simular abertura e encerramento da OS em homologação. Use somente identidades e marcas TESTE; não autoriza operação real."
+                        : "Este documento deve acompanhar a abertura e o encerramento da OS. Quando impresso em branco, os campos podem ser preenchidos e assinados no local.");
         adicionarAuditoria(pdf, documento);
     }
 
@@ -166,7 +171,7 @@ public class DocumentoPdfService {
                 : "ENCERRAMENTO, ACEITE E CONFORMIDADE TÉCNICA";
     }
 
-    private void adicionarObjetoEInicio(Document pdf, JsonNode conteudo) throws Exception {
+    private void adicionarObjetoEInicio(Document pdf, JsonNode conteudo, boolean simulacao) throws Exception {
         adicionarTituloSecao(pdf, "1. OBJETO DA ORDEM DE SERVIÇO");
         adicionarTexto(pdf, "Execução de serviços de infraestrutura tecnológica, incluindo (marcar conforme aplicável):");
         adicionarChecklist(pdf, conteudo, "objetoServicos", OBJETO_SERVICO);
@@ -174,17 +179,17 @@ public class DocumentoPdfService {
         adicionarCaixa(pdf, "Descrição dos serviços previstos ou executados", texto(conteudo, "descricaoServicos", ""), 70);
 
         adicionarTituloSecao(pdf, "2. REGISTRO DE CONDIÇÃO PREDIAL - ESTADO INICIAL");
-        adicionarTexto(pdf, "Declara-se que, antes do início dos serviços:");
+        adicionarTexto(pdf, simulacao ? "No cenário fictício, simula-se que antes do início dos serviços:" : "Declara-se que, antes do início dos serviços:");
         adicionarChecklist(pdf, conteudo, "estadoInicial", ESTADO_INICIAL.subList(0, 4));
     }
 
-    private void adicionarRackEInicioConclusao(Document pdf, JsonNode conteudo) throws Exception {
+    private void adicionarRackEInicioConclusao(Document pdf, JsonNode conteudo, boolean simulacao) throws Exception {
         adicionarChecklist(pdf, conteudo, "estadoInicial", ESTADO_INICIAL.subList(4, ESTADO_INICIAL.size()));
         adicionarCaixa(pdf, "Anomalias pré-existentes identificadas (se houver)", texto(conteudo, "anomaliasPreExistentes", ""), 72);
         adicionarLinha(pdf, "Protocolo de comunicação (se aplicável)", texto(conteudo, "protocoloComunicacao", ""));
 
         adicionarTituloSecao(pdf, "3. NECESSIDADE DE SUBSTITUIÇÃO DO RACK DA COMARCA");
-        adicionarTexto(pdf, "Após a realização da vistoria técnica, declaro que:");
+        adicionarTexto(pdf, simulacao ? "No cenário fictício, a vistoria de TESTE simula que:" : "Após a realização da vistoria técnica, declaro que:");
         adicionarChecklistEscalar(pdf, conteudo, "rackNecessidade",
                 RACK_NECESSIDADE_VALORES, RACK_NECESSIDADE);
         adicionarChecklistEscalar(pdf, conteudo, "rackDisponibilidade",
@@ -197,12 +202,12 @@ public class DocumentoPdfService {
         adicionarChecklist(pdf, conteudo, "estadoFinal", ESTADO_FINAL.subList(0, 4));
     }
 
-    private void adicionarConclusaoEAceite(Document pdf, JsonNode conteudo) throws Exception {
+    private void adicionarConclusaoEAceite(Document pdf, JsonNode conteudo, boolean simulacao) throws Exception {
         adicionarChecklist(pdf, conteudo, "estadoFinal", ESTADO_FINAL.subList(4, ESTADO_FINAL.size()));
         adicionarCaixa(pdf, "Observações finais", texto(conteudo, "observacoesFinais", ""), 48);
 
         adicionarTituloSecao(pdf, "5. DECLARAÇÃO DE ACEITE E CIÊNCIA");
-        adicionarTexto(pdf, "O Gerente do Fórum declara que:");
+        adicionarTexto(pdf, simulacao ? "O gerente fictício simula ciência dos seguintes fatos de TESTE:" : "O Gerente do Fórum declara que:");
         adicionarTexto(pdf, "- Acompanhou ou tomou ciência da conclusão dos serviços;");
     }
 
@@ -213,12 +218,19 @@ public class DocumentoPdfService {
         adicionarCaixa(pdf, "Ressalvas (caso existam)", texto(conteudo, "ressalvas", ""), 62);
 
         adicionarTituloSecao(pdf, "6. CLÁUSULA DE RESGUARDO TÉCNICO");
+        if (documento.isSimulacao()) {
+            adicionarTexto(pdf, "Cláusula fictícia para exercitar o percurso documental. Nenhuma responsabilidade institucional, aceite real ou autorização operacional é emitida.");
+            adicionarTexto(pdf, "As marcas TESTE registram exclusivamente uma simulação de ciência e assinatura em homologação.");
+            adicionarTituloSecao(pdf, "7. ASSINATURAS DE TESTE");
+            adicionarTexto(pdf, "Pela empresa fictícia TESTE:");
+        } else {
         adicionarTexto(pdf, "A presente Ordem de Serviço e a vistoria prévia realizada conjuntamente têm como finalidade registrar as condições aparentes dos ambientes e equipamentos existentes antes da execução dos serviços, incluindo computadores, impressoras e telefones.");
         adicionarTexto(pdf, "Fica estabelecido que eventuais defeitos, falhas, vícios, desgastes naturais, irregularidades ou danos preexistentes não poderão ser imputados à equipe técnica da RC Technology, assim como qualquer dano futuro não poderá ser atribuído à execução dos serviços realizados, salvo mediante comprovação técnica de dolo ou culpa grave.");
         adicionarTexto(pdf, "A assinatura deste documento pelas partes envolvidas formaliza a ciência, concordância e validação das condições verificadas no ato da vistoria e da conclusão dos serviços executados.");
 
         adicionarTituloSecao(pdf, "7. ASSINATURAS");
         adicionarTexto(pdf, "Pela RC Technology:");
+        }
         PdfPTable tabela = new PdfPTable(1);
         tabela.setWidthPercentage(100);
         adicionarAssinatura(tabela,
@@ -229,10 +241,10 @@ public class DocumentoPdfService {
     }
 
     private void adicionarResponsavelDesignado(Document pdf, JsonNode conteudo, DocumentoInterno documento) throws Exception {
-        adicionarTituloSecao(pdf, "7. ASSINATURAS (CONTINUAÇÃO)");
+        adicionarTituloSecao(pdf, documento.isSimulacao() ? "7. ASSINATURAS DE TESTE (CONTINUAÇÃO)" : "7. ASSINATURAS (CONTINUAÇÃO)");
         PdfPTable tabela = new PdfPTable(2);
         tabela.setWidthPercentage(100);
-        adicionarAssinatura(tabela, "Gestor do projeto RC Technology",
+        adicionarAssinatura(tabela, documento.isSimulacao() ? "Gestor fictício TESTE" : "Gestor do projeto RC Technology",
                 texto(conteudo, "gestorProjetoRc", documento.getGestorAssinadoPor()),
                 documento.getAssinaturaGestorBase64());
         adicionarAssinatura(tabela,
@@ -253,11 +265,15 @@ public class DocumentoPdfService {
         adicionarTituloSecao(pdf, "DECLARAÇÃO DE DESIGNAÇÃO");
         String gerenteDesignante = texto(conteudo, "gerenteDesignanteNome",
                 texto(conteudo, "gerenteForum", ""));
+        if (documento.isSimulacao()) {
+            adicionarTexto(pdf, "O gerente fictício TESTE simula a designação de um acompanhante fictício para a vistoria de TESTE. Esta declaração não representa qualquer instituição e não confere autorização real.");
+        } else {
         adicionarTexto(pdf, "Eu, " + valorLinha(gerenteDesignante)
                 + ", na condição de Gerente da Comarca/Unidade, declaro para os devidos fins que designo o(a) "
                 + "servidor(a)/colaborador(a) acima identificado(a) para acompanhar a vistoria prévia e os "
                 + "procedimentos relacionados à execução dos serviços, conferindo-lhe autorização para atuar "
                 + "em minha representação durante todo o processo de inspeção inicial dos ambientes.");
+        }
         adicionarLinha(pdf, "Assinatura do(a) Gerente", "");
         adicionarLinha(pdf, "Data", texto(conteudo, "declaracaoDesignacaoData", ""));
         adicionarAuditoria(pdf, documento);
@@ -498,9 +514,11 @@ public class DocumentoPdfService {
 
     private static class CabecalhoRodape extends PdfPageEventHelper {
         private final int totalPaginas;
+        private final boolean simulacao;
 
-        private CabecalhoRodape(int totalPaginas) {
+        private CabecalhoRodape(int totalPaginas, boolean simulacao) {
             this.totalPaginas = totalPaginas;
+            this.simulacao = simulacao;
         }
 
         @Override
@@ -519,14 +537,14 @@ public class DocumentoPdfService {
                 canvas.fill();
                 canvas.restoreState();
 
-                adicionarLogo(canvas, altura);
+                if (!simulacao) adicionarLogo(canvas, altura);
                 canvas.beginText();
                 canvas.setFontAndSize(com.lowagie.text.pdf.BaseFont.createFont(), 8);
                 canvas.setColorFill(Color.WHITE);
-                canvas.showTextAligned(Element.ALIGN_LEFT, "RC TECHNOLOGY AND INTEGRATION LTDA", 42, altura - 37, 0);
-                canvas.showTextAligned(Element.ALIGN_LEFT, "Documento operacional", 42, 11, 0);
+                canvas.showTextAligned(Element.ALIGN_LEFT, simulacao ? SimulacaoDocumentoService.EMPRESA : "RC TECHNOLOGY AND INTEGRATION LTDA", 42, altura - 37, 0);
+                canvas.showTextAligned(Element.ALIGN_LEFT, simulacao ? SimulacaoDocumentoService.MARCA : "Documento operacional", 42, 11, 0);
                 canvas.showTextAligned(Element.ALIGN_RIGHT,
-                        "Página " + writer.getPageNumber() + " de " + totalPaginas,
+                        "Página " + writer.getPageNumber() + (simulacao ? "" : " de " + totalPaginas),
                         largura - 42, 11, 0);
                 canvas.endText();
             } catch (Exception ex) {

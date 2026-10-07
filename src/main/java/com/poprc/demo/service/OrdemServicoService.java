@@ -45,9 +45,11 @@ public class OrdemServicoService {
     private final ComarcaService comarcaService;
     private final OrdemRetiradaPort ordemRetiradaPort;
     private final FluxoOrdemServicoService fluxoOrdemServicoService;
+    private final SimulacaoDocumentoService simulacaoDocumentoService;
 
     @Transactional
     public OrdemServico criar(CriarOrdemServicoRequest request) {
+        simulacaoDocumentoService.exigirHabilitada(request.isSimulacao());
         if (request.getProjetoId() == null) {
             throw new IllegalArgumentException("Projeto/Comarca alvo é obrigatório para criar a OS.");
         }
@@ -82,6 +84,7 @@ public class OrdemServicoService {
         }
 
         OrdemServico ordemServico = new OrdemServico();
+        ordemServico.setSimulacao(request.isSimulacao());
         ordemServico.setNumeroOs(gerarNumeroOs(contrato));
         ordemServico.setContrato(contrato);
         ordemServico.setProjeto(projeto);

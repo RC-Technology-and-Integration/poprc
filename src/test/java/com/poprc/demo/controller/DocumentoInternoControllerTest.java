@@ -32,6 +32,32 @@ import static org.mockito.Mockito.when;
 
 class DocumentoInternoControllerTest {
 
+    @Test
+    void simulacaoDevePreservarPngCapturadoPeloFluxoNormal() {
+        documento.setSimulacao(true);
+        controller = new DocumentoInternoController(documentoRepository, comarcaRepository,
+                logRepository, mock(DocumentoPdfService.class), mock(AcessoOperacionalService.class),
+                new com.poprc.demo.service.SimulacaoDocumentoService(true, "homologacao"));
+        var request = assinaturaPngValida();
+        String capturada = request.getAssinaturaBase64();
+        var salvo = controller.assinarDocumentoPorPapel(1L, "TECNICO", request, autenticacao("Sistema")).getBody();
+        assertEquals(capturada, salvo.getAssinaturaTecnicoBase64(),
+                "A simulação deve preservar o PNG capturado, sem trocar por assinatura automática.");
+        assertTrue(salvo.getTecnicoAssinadoPor().startsWith("TESTE"));
+    }
+
+    @Test
+    void simulacaoExplicitaDeveSerRecusadaPorPadrao() {
+        var request = new DocumentoInternoController.DocumentoVistoriaRequest() {
+            public boolean isSimulacao() { return true; }
+        };
+        request.setComarcaId(1L);
+        request.setConteudoJson("{}");
+        when(comarcaRepository.findById(1L)).thenReturn(Optional.of(new Comarca()));
+        assertThrows(IllegalStateException.class,
+                () -> controller.gerarDocumentoVistoria(request, autenticacao("Sistema")));
+    }
+
     private DocumentoInternoRepository documentoRepository;
     private ComarcaRepository comarcaRepository;
     private DocumentoAssinaturaLogRepository logRepository;
@@ -48,7 +74,8 @@ class DocumentoInternoControllerTest {
                 comarcaRepository,
                 logRepository,
                 mock(DocumentoPdfService.class),
-                mock(AcessoOperacionalService.class));
+                mock(AcessoOperacionalService.class),
+                new com.poprc.demo.service.SimulacaoDocumentoService(false, "homologacao"));
 
         documento = new DocumentoInterno();
         documento.setId(1L);

@@ -28,6 +28,10 @@ import java.util.List;
 @AllArgsConstructor
 public class OrdemRetirada {
 
+    public boolean isSimulacao() {
+        return ordemServico != null && ordemServico.isSimulacao();
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

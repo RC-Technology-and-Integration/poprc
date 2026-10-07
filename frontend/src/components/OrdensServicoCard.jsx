@@ -35,7 +35,7 @@ export default function OrdensServicoCard({ ordem, onAtualizarStatus }) {
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            {ordem.numeroOs || 'S/N'}
+            {ordem.simulacao ? 'TESTE · ' : ''}{ordem.numeroOs || 'S/N'}
           </p>
           <p className="text-sm font-bold text-gray-900 mt-1">
             {ordem.contrato?.cliente || 'Cliente não definido'}

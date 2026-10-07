@@ -66,7 +66,8 @@ class ComarcaControllerAutorizacaoTest {
                 mock(MaterialItemRepository.class), mock(MaterialRepository.class),
                 mock(MovimentacaoEstoqueRepository.class), mock(OrdemRetiradaRepository.class),
                 mock(DocumentoInternoRepository.class), projetoRepository,
-                mock(FluxoOrdemServicoService.class), mock(SaldoLocalService.class));
+                mock(FluxoOrdemServicoService.class), mock(SaldoLocalService.class),
+                mock(com.poprc.demo.service.SimulacaoDocumentoService.class));
         ReflectionTestUtils.setField(comarcaService, "entityManager", mock(EntityManager.class));
         controller = new ComarcaController(comarcaService, comarcaRepository,
                 mock(ArquivamentoService.class), acesso);

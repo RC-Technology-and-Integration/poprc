@@ -8,6 +8,7 @@ import com.poprc.demo.repository.DocumentoAssinaturaLogRepository;
 import com.poprc.demo.repository.DocumentoInternoRepository;
 import com.poprc.demo.service.DocumentoPdfService;
 import com.poprc.demo.service.AcessoOperacionalService;
+import com.poprc.demo.service.SimulacaoDocumentoService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -56,6 +57,12 @@ public class DocumentoInternoController {
     private final DocumentoAssinaturaLogRepository assinaturaLogRepository;
     private final DocumentoPdfService documentoPdfService;
     private final AcessoOperacionalService acessoOperacionalService;
+    private final SimulacaoDocumentoService simulacaoDocumentoService;
+
+    @GetMapping("/configuracao")
+    public Map<String, Boolean> configuracao() {
+        return Map.of("simulacaoHabilitada", simulacaoDocumentoService.isHabilitada());
+    }
 
     @GetMapping("/comarca/{comarcaId}")
     public ResponseEntity<List<DocumentoInterno>> listarPorComarca(
@@ -77,14 +84,21 @@ public class DocumentoInternoController {
             @RequestBody DocumentoVistoriaRequest request,
             Authentication authentication) {
         acessoOperacionalService.garantirAcessoComarca(request.getComarcaId(), authentication);
+        simulacaoDocumentoService.exigirHabilitada(request.isSimulacao());
         Comarca comarca = comarcaRepository.findById(request.getComarcaId())
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
 
         DocumentoInterno documento = new DocumentoInterno();
+        boolean simulacao = comarca.getOrdemServico() != null && comarca.getOrdemServico().isSimulacao();
+        simulacaoDocumentoService.exigirHabilitada(simulacao);
+        if (request.isSimulacao() != simulacao) {
+            throw new IllegalArgumentException("A simulação do documento deve corresponder à OS vinculada.");
+        }
+        documento.setSimulacao(simulacao);
         documento.setTipo(normalizarTipoDocumento(request.getTipo()));
         documento.setStatus(STATUS_PENDENTE);
         documento.setComarca(comarca);
-        documento.setConteudoJson(request.getConteudoJson());
+        documento.setConteudoJson(simulacao ? SimulacaoDocumentoService.conteudoFicticio(request.getConteudoJson()) : request.getConteudoJson());
         documento.setCriadoPor(usuarioAtual(authentication));
         documento.setRecebidoPor(normalizarRecebedor(request.getRecebidoPor()));
         documento.setDataGeracao(LocalDateTime.now());
@@ -102,6 +116,10 @@ public class DocumentoInternoController {
         if (!podeVisualizar(documento, usuarioAtual(authentication))) {
             return ResponseEntity.status(403).build();
         }
+        simulacaoDocumentoService.exigirHabilitada(documento.isSimulacao() || request.isSimulacao());
+        if (request.isSimulacao() != documento.isSimulacao()) {
+            throw new IllegalArgumentException("Não é possível converter a identificação de simulação do documento.");
+        }
         if (!STATUS_PENDENTE.equals(documento.getStatus())
                 || temTexto(documento.getAssinaturaTecnicoBase64())
                 || temTexto(documento.getAssinaturaGestorBase64())
@@ -112,7 +130,7 @@ public class DocumentoInternoController {
         if (request.getConteudoJson() == null || request.getConteudoJson().isBlank()) {
             throw new IllegalArgumentException("O conteúdo do documento é obrigatório.");
         }
-        documento.setConteudoJson(request.getConteudoJson());
+        documento.setConteudoJson(documento.isSimulacao() ? SimulacaoDocumentoService.conteudoFicticio(request.getConteudoJson()) : request.getConteudoJson());
         documento.setRecebidoPor(normalizarRecebedor(request.getRecebidoPor()));
         return ResponseEntity.ok(documentoInternoRepository.save(documento));
     }
@@ -130,6 +148,7 @@ public class DocumentoInternoController {
         if (!podeVisualizar(documento, usuarioAtual)) {
             return ResponseEntity.status(403).build();
         }
+        simulacaoDocumentoService.exigirHabilitada(documento.isSimulacao());
         if (STATUS_INVALIDADO.equals(documento.getStatus())) {
             throw new IllegalStateException("Este documento já foi invalidado.");
         }
@@ -149,6 +168,7 @@ public class DocumentoInternoController {
         documentoInternoRepository.save(documento);
 
         DocumentoInterno novaVersao = new DocumentoInterno();
+        novaVersao.setSimulacao(documento.isSimulacao());
         novaVersao.setTipo(documento.getTipo());
         novaVersao.setStatus(STATUS_PENDENTE);
         novaVersao.setComarca(documento.getComarca());
@@ -169,6 +189,10 @@ public class DocumentoInternoController {
         DocumentoInterno documento = documentoInternoRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Documento não encontrado."));
         garantirAcessoDocumento(documento, authentication);
+        if (documento.isSimulacao()) {
+            simulacaoDocumentoService.exigirHabilitada(true);
+            throw new IllegalStateException("A simulação exige as assinaturas dos três papéis; use a rota de assinaturas por papel.");
+        }
         if (!podeVisualizar(documento, usuarioAtual)) {
             return ResponseEntity.status(403).build();
         }
@@ -176,7 +200,6 @@ public class DocumentoInternoController {
             throw new IllegalStateException("Documento finalizado não pode receber novas assinaturas.");
         }
         validarAssinatura(request.getAssinaturaBase64());
-
         documento.setAssinaturaBase64(request.getAssinaturaBase64());
         documento.setStatus(STATUS_REGISTRADO);
         documento.setDataAssinatura(agoraPersistivel());
@@ -196,6 +219,9 @@ public class DocumentoInternoController {
         DocumentoInterno documento = documentoInternoRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Documento não encontrado."));
         garantirAcessoDocumento(documento, authentication);
+        if (documento.isSimulacao() && STATUS_INVALIDADO.equals(documento.getStatus())) {
+            throw new IllegalStateException("Documento de simulação invalidado não pode receber assinaturas.");
+        }
         if (!podeVisualizar(documento, usuarioAtual)) {
             return ResponseEntity.status(403).build();
         }
@@ -203,6 +229,11 @@ public class DocumentoInternoController {
             throw new IllegalStateException("Documento finalizado não pode receber novas assinaturas.");
         }
         validarAssinatura(request.getAssinaturaBase64());
+        simulacaoDocumentoService.exigirHabilitada(documento.isSimulacao());
+        if (documento.isSimulacao()) {
+            request.setNomeAssinante("TESTE FICTÍCIO — " + papel.toUpperCase());
+        }
+
 
         String assinadoPor = request.getNomeAssinante() != null && !request.getNomeAssinante().isBlank()
                 ? request.getNomeAssinante().trim()
@@ -443,6 +474,7 @@ public class DocumentoInternoController {
                     String.valueOf(documento.getAssinaturaGerenteBase64()),
                     String.valueOf(documento.getGerenteAssinadoPor()),
                     String.valueOf(documento.getDataAssinaturaGerente()));
+            if (documento.isSimulacao()) base += "|SIMULACAO";
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(digest.digest(base.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
@@ -452,6 +484,7 @@ public class DocumentoInternoController {
 
     @Data
     public static class DocumentoVistoriaRequest {
+        private boolean simulacao;
         private Long comarcaId;
         private String tipo;
         private String conteudoJson;

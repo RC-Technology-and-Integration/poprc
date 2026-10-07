@@ -28,6 +28,10 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class OrdemRetiradaDocumento {
 
+    public boolean isSimulacao() {
+        return ordemRetirada != null && ordemRetirada.isSimulacao();
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

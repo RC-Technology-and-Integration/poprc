@@ -181,7 +181,7 @@ public class OrdemRetiradaPdfService {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             Document pdf = new Document(PageSize.A4, 36, 36, 72, 48);
             PdfWriter writer = PdfWriter.getInstance(pdf, output);
-            writer.setPageEvent(new CabecalhoRodape());
+            writer.setPageEvent(new CabecalhoRodape(ordem.isSimulacao()));
             pdf.open();
 
             Paragraph titulo = new Paragraph("ORDEM DE RETIRADA (OR)", TITULO);
@@ -202,7 +202,7 @@ public class OrdemRetiradaPdfService {
             adicionarDevolucao(pdf, ordem);
 
             Paragraph nota = new Paragraph(
-                    "A retirada de qualquer item depende da apresentação desta OR. Ferramentas devem retornar obrigatoriamente; materiais de consumo remanescentes devem ser devolvidos ao estoque.",
+                    ordem.isSimulacao() ? "Simulação fictícia de retirada e devolução: este documento não autoriza movimentação operacional. As regras de conferência e retorno continuam obrigatórias no cenário de TESTE." : "A retirada de qualquer item depende da apresentação desta OR. Ferramentas devem retornar obrigatoriamente; materiais de consumo remanescentes devem ser devolvidos ao estoque.",
                     new Font(Font.HELVETICA, 7.5f, Font.ITALIC, new Color(71, 85, 105)));
             nota.setSpacingBefore(10);
             pdf.add(nota);
@@ -222,11 +222,11 @@ public class OrdemRetiradaPdfService {
         campo(tabela, "Número da OR", ordem.getNumeroOr());
         campo(tabela, "Status", ordem.getStatus());
         campo(tabela, "Ordem de Serviço", os == null ? null : os.getNumeroOs());
-        campo(tabela, "Contrato", os == null || os.getContrato() == null ? null : os.getContrato().getContrato());
-        campo(tabela, "Comarca / Fórum", comarca == null ? null : comarca.getNomeComarca());
-        campo(tabela, "Endereço", comarca == null ? null : comarca.getEndereco());
+        campo(tabela, "Contrato", ordem.isSimulacao() ? "CONTRATO FICTÍCIO TESTE" : os == null || os.getContrato() == null ? null : os.getContrato().getContrato());
+        campo(tabela, "Comarca / Fórum", ordem.isSimulacao() ? "UNIDADE FICTÍCIA TESTE" : comarca == null ? null : comarca.getNomeComarca());
+        campo(tabela, "Endereço", ordem.isSimulacao() ? "ENDEREÇO FICTÍCIO TESTE" : comarca == null ? null : comarca.getEndereco());
         campo(tabela, "Gerada em", data(ordem.getDataGeracao()));
-        campo(tabela, "Gerada por", ordem.getGeradoPor());
+        campo(tabela, "Gerada por", ordem.isSimulacao() ? "OPERADOR FICTÍCIO TESTE" : ordem.getGeradoPor());
         pdf.add(tabela);
     }
 
@@ -378,6 +378,9 @@ public class OrdemRetiradaPdfService {
     }
 
     private static class CabecalhoRodape extends PdfPageEventHelper {
+        private final boolean simulacao;
+        private CabecalhoRodape(boolean simulacao) { this.simulacao = simulacao; }
+
         @Override
         public void onEndPage(PdfWriter writer, Document document) {
             try {
@@ -392,13 +395,13 @@ public class OrdemRetiradaPdfService {
                 canvas.rectangle(0, 0, largura, 29);
                 canvas.fill();
                 canvas.restoreState();
-                adicionarLogo(canvas, altura);
+                if (!simulacao) adicionarLogo(canvas, altura);
 
                 canvas.beginText();
                 canvas.setFontAndSize(BaseFont.createFont(), 8);
                 canvas.setColorFill(Color.WHITE);
-                canvas.showTextAligned(Element.ALIGN_LEFT, "RC TECHNOLOGY AND INTEGRATION LTDA", 42, altura - 37, 0);
-                canvas.showTextAligned(Element.ALIGN_LEFT, "Controle de retirada e devolução", 36, 11, 0);
+                canvas.showTextAligned(Element.ALIGN_LEFT, simulacao ? SimulacaoDocumentoService.EMPRESA : "RC TECHNOLOGY AND INTEGRATION LTDA", 42, altura - 37, 0);
+                canvas.showTextAligned(Element.ALIGN_LEFT, simulacao ? SimulacaoDocumentoService.MARCA : "Controle de retirada e devolução", 36, 11, 0);
                 canvas.showTextAligned(Element.ALIGN_RIGHT, "Página " + writer.getPageNumber(), largura - 36, 11, 0);
                 canvas.endText();
             } catch (Exception ex) {

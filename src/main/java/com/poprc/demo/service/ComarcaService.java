@@ -72,6 +72,7 @@ public class ComarcaService {
     private final ProjetoRepository projetoRepository;
     private final FluxoOrdemServicoService fluxoOrdemServicoService;
     private final SaldoLocalService saldoLocalService;
+    private final SimulacaoDocumentoService simulacaoDocumentoService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -619,6 +620,8 @@ public class ComarcaService {
     public EncerramentoObraResultado concluirObra(Long id, String concluidaPor) {
         Comarca comarca = buscarComarcaTravada(id)
                 .orElseThrow(() -> new IllegalArgumentException("Obra não encontrada."));
+        boolean simulacao = comarca.getOrdemServico() != null && comarca.getOrdemServico().isSimulacao();
+        simulacaoDocumentoService.exigirHabilitada(simulacao);
 
         if (OBRA_CONCLUIDA.equals(comarca.getSituacao()) && comarca.getDataConclusao() != null) {
             return montarEncerramento(comarca);
@@ -653,7 +656,7 @@ public class ComarcaService {
         List<DocumentoInterno> documentosFinais = documentoInternoRepository
                 .findByComarcaIdAndTipoAndStatusOrderByDataGeracaoDesc(
                         comarca.getId(), DOCUMENTO_ENCERRAMENTO, DOCUMENTO_REGISTRADO);
-        if (documentosFinais.isEmpty()) {
+        if (documentosFinais.stream().noneMatch(documento -> documento.isSimulacao() == simulacao)) {
             throw new IllegalArgumentException(
                     "Salve e conclua as três assinaturas do documento final antes de encerrar a obra.");
         }
