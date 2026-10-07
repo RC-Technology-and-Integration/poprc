@@ -6,12 +6,15 @@ RUN npm ci
 
 COPY frontend ./
 ARG VITE_APP_VERSION="0.1.0"
-ARG VITE_APP_REVISION="dokploy"
+ARG VITE_APP_REVISION
 ENV VITE_APP_VERSION=$VITE_APP_VERSION
 ENV VITE_APP_REVISION=$VITE_APP_REVISION
-RUN npm run build
+RUN node --input-type=module -e 'if (!/^[a-f0-9]{40}$/i.test(process.env.VITE_APP_REVISION || "")) throw new Error("VITE_APP_REVISION exige SHA completo fornecido externamente")' && npm run build
 
 FROM nginx:1.28-alpine
+
+ARG VITE_APP_REVISION
+LABEL org.opencontainers.image.revision=$VITE_APP_REVISION
 
 COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /workspace/dist /usr/share/nginx/html
