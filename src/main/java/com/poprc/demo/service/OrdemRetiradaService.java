@@ -60,6 +60,7 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
     private final FluxoOrdemServicoService fluxoOrdemServicoService;
     private final OrdemRetiradaPdfService ordemRetiradaPdfService;
     private final EvidenciaMetragemOrService evidenciaMetragemOrService;
+    private final SimulacaoDocumentoService simulacaoDocumentoService;
 
     @Transactional
     public OrdemRetirada criarParaOrdemServico(OrdemServico ordemServico, Comarca comarca, String geradoPor) {
@@ -71,6 +72,7 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
         }
         ordemServico = ordemServicoRepository.findByIdForUpdate(ordemServico.getId())
                 .orElseThrow(() -> new IllegalArgumentException("OS não encontrada."));
+        simulacaoDocumentoService.exigirHabilitada(ordemServico.isSimulacao());
 
         OrdemRetirada ordemRetirada = new OrdemRetirada();
         ordemRetirada.setNumeroOr(gerarNumeroOr(ordemServico));
@@ -141,6 +143,7 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
     @Transactional
     public OrdemRetirada executarRetirada(Long id, ExecutarOrdemRetiradaRequest request) {
         OrdemRetirada ordemRetirada = buscar(id);
+        simulacaoDocumentoService.exigirHabilitada(ordemRetirada.isSimulacao());
         if (!STATUS_GERADA.equals(ordemRetirada.getStatus())) {
             throw new IllegalArgumentException("Esta OR não está disponível para retirada.");
         }
@@ -148,6 +151,10 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
         validarTexto(request.getLevadoPor(), "Informe quem levou os itens.");
         validarTexto(request.getAssinaturaConferenteBase64(), "Assinatura de quem conferiu é obrigatória.");
         validarTexto(request.getAssinaturaRetiranteBase64(), "Assinatura de quem levou é obrigatória.");
+        if (ordemRetirada.isSimulacao()) {
+            request.setConferidoPor("TESTE FICTÍCIO — CONFERENTE");
+            request.setLevadoPor("TESTE FICTÍCIO — RETIRANTE");
+        }
         fluxoOrdemServicoService.validarRetiradaPermitida(ordemRetirada.getOrdemServico().getId());
 
         Map<Long, List<ExecutarOrdemRetiradaRequest.AlocacaoRequest>> alocacoesPorItem = request.getAlocacoes() == null
@@ -237,12 +244,17 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
     @Transactional
     public OrdemRetirada devolver(Long id, DevolverOrdemRetiradaRequest request) {
         OrdemRetirada ordemRetirada = buscar(id);
+        simulacaoDocumentoService.exigirHabilitada(ordemRetirada.isSimulacao());
         if (!STATUS_RETIRADA.equals(ordemRetirada.getStatus())) {
             throw new IllegalArgumentException("A OR precisa estar retirada para registrar devolução.");
         }
         validarTexto(request.getDevolvidoPor(), "Informe quem devolveu os itens.");
         validarTexto(request.getRecebidoPor(), "Informe quem conferiu/recebeu a devolução.");
         validarTexto(request.getAssinaturaRecebimentoBase64(), "Assinatura de recebimento é obrigatória.");
+        if (ordemRetirada.isSimulacao()) {
+            request.setDevolvidoPor("TESTE FICTÍCIO — DEVOLUÇÃO");
+            request.setRecebidoPor("TESTE FICTÍCIO — RECEBIMENTO");
+        }
 
         Map<Long, DevolverOrdemRetiradaRequest.ItemDevolucaoRequest> devolucoes = request.getItens() == null
                 ? Map.of()

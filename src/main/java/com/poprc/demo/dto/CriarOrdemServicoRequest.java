@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 
 @Data
 public class CriarOrdemServicoRequest {
+    private boolean simulacao;
     private Long contratoId;
     private Long projetoId;
     private String descricao;

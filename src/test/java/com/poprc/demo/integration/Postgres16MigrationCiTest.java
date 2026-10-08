@@ -26,7 +26,50 @@ class Postgres16MigrationCiTest {
     private static final String ADMIN_URL = "jdbc:postgresql://localhost:5432/postgres";
 
     @Test
-    void migracoesDesdeVazioEAtualizacaoLegada() throws Exception {
+    void atualizacaoV38AV40PreservaHomologacoesLegadas() throws Exception {
+        validarServidorDescartavel();
+        String user = requiredEnv("TEST_DB_USERNAME");
+        String password = requiredEnv("TEST_DB_PASSWORD");
+
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        String legacy = "poprc_ci_legacy_" + suffix + "_test";
+        List<String> created = new ArrayList<>();
+        try {
+            createDatabase(legacy, user, password);
+            created.add(legacy);
+
+            Flyway legacyTo38 = flyway(legacy, user, password, "38");
+            legacyTo38.migrate();
+            assertMigrationCount(legacy, user, password, 38);
+            seedLegacyRows(legacy, user, password);
+
+            flyway(legacy, user, password, null).migrate();
+            assertMigrationCount(legacy, user, password, 40);
+            assertLegacyRowsPreserved(legacy, user, password);
+        } finally {
+            for (String database : created) {
+                dropDatabase(database, user, password);
+                assertFalse(databaseExists(database, user, password), "Banco temporário não foi removido: " + database);
+            }
+        }
+    }
+
+    @Test
+    void bancoVazioRecebeV1AV40() throws Exception {
+        validarServidorDescartavel();
+        String user = requiredEnv("TEST_DB_USERNAME"), password = requiredEnv("TEST_DB_PASSWORD");
+        String database = "poprc_ci_fresh_" + UUID.randomUUID().toString().replace("-", "") + "_test";
+        createDatabase(database, user, password);
+        try {
+            assertEquals(40, flyway(database, user, password, null).migrate().migrationsExecuted);
+            assertMigrationCount(database, user, password, 40);
+        } finally {
+            dropDatabase(database, user, password);
+            assertFalse(databaseExists(database, user, password));
+        }
+    }
+
+    private static void validarServidorDescartavel() throws Exception {
         assertEquals("true", System.getenv("GITHUB_ACTIONS"), "Este teste só pode criar bancos no runner do CI.");
         assertEquals(SERVICE_URL, requiredEnv("TEST_DB_URL"), "Destino inesperado para o PostgreSQL descartável.");
         String user = requiredEnv("TEST_DB_USERNAME");
@@ -42,34 +85,6 @@ class Postgres16MigrationCiTest {
             }
         }
 
-        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-        String fresh = "poprc_ci_fresh_" + suffix + "_test";
-        String legacy = "poprc_ci_legacy_" + suffix + "_test";
-        List<String> created = new ArrayList<>();
-        try {
-            createDatabase(fresh, user, password);
-            created.add(fresh);
-            createDatabase(legacy, user, password);
-            created.add(legacy);
-
-            Flyway freshFlyway = flyway(fresh, user, password, null);
-            freshFlyway.migrate();
-            assertMigrationCount(fresh, user, password, 39);
-
-            Flyway legacyTo38 = flyway(legacy, user, password, "38");
-            legacyTo38.migrate();
-            assertMigrationCount(legacy, user, password, 38);
-            seedLegacyRows(legacy, user, password);
-
-            flyway(legacy, user, password, null).migrate();
-            assertMigrationCount(legacy, user, password, 39);
-            assertLegacyRowsPreserved(legacy, user, password);
-        } finally {
-            for (String database : created) {
-                dropDatabase(database, user, password);
-                assertFalse(databaseExists(database, user, password), "Banco temporário não foi removido: " + database);
-            }
-        }
     }
 
     private static String requiredEnv(String name) {

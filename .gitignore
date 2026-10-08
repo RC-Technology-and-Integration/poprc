@@ -10,6 +10,8 @@ rc_uploads/
 tmp/
 .runtime/
 outputs/
+frontend/playwright-report/
+frontend/test-results/
 scripts/ngrok.yml
 deploy/env/*.env
 ~$*.docx

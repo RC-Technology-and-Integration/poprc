@@ -37,6 +37,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Configure a senha do PostgreSQL}
       APP_UPLOAD_DIR: /var/lib/poprc/uploads
       APP_SECURITY_ENABLED: "true"
+      APP_AMBIENTE: ${APP_AMBIENTE:-nao-definido}
+      DOCUMENTOS_SIMULACAO_ENABLED: ${DOCUMENTOS_SIMULACAO_ENABLED:-false}
       DEV_LOGIN_ENABLED: "false"
       ZOHO_ENABLED: "false"
       REAUTHENTICATION_MINUTES: ${REAUTHENTICATION_MINUTES:-5}
@@ -73,7 +75,7 @@ services:
       dockerfile: deploy/docker/frontend.Dockerfile
       args:
         VITE_APP_VERSION: ${APP_VERSION:-0.1.0}
-        VITE_APP_REVISION: ${APP_REVISION:-dokploy}
+        VITE_APP_REVISION: ${APP_REVISION:?Forneca o SHA completo verificado da revisao selecionada}
     restart: unless-stopped
     depends_on:
       backend:

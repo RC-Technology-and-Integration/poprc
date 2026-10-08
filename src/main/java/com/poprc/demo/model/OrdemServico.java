@@ -28,6 +28,9 @@ public class OrdemServico {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(nullable = false, updatable = false)
+    private boolean simulacao;
+
     @Column(unique = true, nullable = false)
     private String numeroOs;
 

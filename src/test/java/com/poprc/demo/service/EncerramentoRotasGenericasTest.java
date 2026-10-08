@@ -57,7 +57,7 @@ class EncerramentoRotasGenericasTest {
                 mock(MaterialRepository.class), mock(MovimentacaoEstoqueRepository.class),
                 mock(OrdemRetiradaRepository.class), mock(DocumentoInternoRepository.class),
                 mock(ProjetoRepository.class), mock(FluxoOrdemServicoService.class),
-                mock(SaldoLocalService.class));
+                mock(SaldoLocalService.class), mock(SimulacaoDocumentoService.class));
         ReflectionTestUtils.setField(service, "entityManager", mock(EntityManager.class));
 
         assertThrows(IllegalStateException.class,

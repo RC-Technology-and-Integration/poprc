@@ -1,3 +1,4 @@
+import { MARCA_SIMULACAO } from "../utils/simulacaoDocumento";
 import React, { useState, useEffect } from "react";
 import {
   CheckCircle,
@@ -108,8 +109,10 @@ export default function GestaoOrdensServico() {
   const [draggingOrdem, setDraggingOrdem] = useState(null);
   const [checklistModalOpen, setChecklistModalOpen] = useState(false);
   const [ordemChecklistFoco, setOrdemChecklistFoco] = useState(null);
+  const [simulacaoHabilitada, setSimulacaoHabilitada] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [formData, setFormData] = useState({
+    simulacao: false,
     descricao: "",
     projetoId: "",
     contratoId: "",
@@ -121,11 +124,13 @@ export default function GestaoOrdensServico() {
 
   const carregarAlvosNovaOs = async () => {
     try {
-      const [projetosResponse, comarcasResponse, materiaisResponse] = await Promise.all([
+      const [projetosResponse, comarcasResponse, materiaisResponse, configuracaoResponse] = await Promise.all([
         api.get("/projetos"),
         api.get("/comarcas"),
         api.get("/estoque/materiais"),
+        api.get("/documentos-internos/configuracao"),
       ]);
+      setSimulacaoHabilitada(configuracaoResponse.data?.simulacaoHabilitada === true);
       setProjetos(projetosResponse.data || []);
       setComarcas(comarcasResponse.data || []);
       setMateriaisEstoque(materiaisResponse.data || []);
@@ -525,7 +530,8 @@ export default function GestaoOrdensServico() {
     }
 
     setFormData({
-      descricao: "",
+      simulacao: false,
+    descricao: "",
       projetoId: pInicial.id,
       contratoId: pInicial.contrato?.id || "",
       dataHoraInicio: "",
@@ -795,6 +801,12 @@ export default function GestaoOrdensServico() {
       {createModalOpen && (
         <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Abrir Nova Ordem de Serviço">
             <form onSubmit={handleCriarOS} className="space-y-4">
+              {simulacaoHabilitada && <label className="block rounded border border-amber-300 bg-amber-50 p-3 text-sm">
+                <input type="checkbox" checked={formData.simulacao} onChange={e => setFormData(prev => ({ ...prev, simulacao: e.target.checked }))} />
+                <strong className="ml-2">Criar OS de simulação documental</strong>
+                <p>{MARCA_SIMULACAO}. Escolha permanente nesta OS; OR, vistoria e encerramento serão fictícios. Use um projeto de TESTE; as regras e movimentos de estoque permanecem obrigatórios.</p>
+              </label>}
+
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">
                   Código / Número da OS

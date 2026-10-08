@@ -37,6 +37,12 @@ jobs:
       - name: Auditar vulnerabilidades altas
         run: npm audit --audit-level=high
 
+      - name: Executar testes do frontend e preparo isolado
+        run: npm run test:utils
+
+      - name: Identificar o checkout efetivamente compilado
+        run: echo "VITE_APP_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
       - name: Compilar frontend
         run: npm run build
 
@@ -76,11 +82,67 @@ jobs:
       - name: Validar scripts de implantacao
         run: bash -n deploy/scripts/*.sh
 
-      - name: Validar migracoes V1-V39 e V38-V39 no PostgreSQL 16
-        run: ./mvnw --batch-mode -Dpoprc.pg16.migration=true -Dtest=Postgres16MigrationCiTest test
+      - name: Validar V1-V40, V38-V40 e somente V40 sobre V39 no PostgreSQL 16
+        run: ./mvnw --batch-mode -Dspring.config.import= -Dpoprc.pg16.migration=true -Dtest=Postgres16MigrationCiTest,SimulacaoMigrationTest test
 
-      - name: Executar testes
-        run: ./mvnw --batch-mode test
+      - name: Executar suite completa e empacotar backend
+        run: ./mvnw --batch-mode -Dspring.config.import= verify
+
+      - name: Configurar Node.js para captura normal no navegador
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Preparar navegador de teste
+        working-directory: frontend
+        run: npm ci && npx playwright install --with-deps chromium
+
+      - name: Capturar TESTE pelo fluxo normal em banco e uploads novos
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          database=poprc_simulacao_e2e_test
+          createdb -h localhost -U postgres "$database"
+          backend_pid=''
+          frontend_pid=''
+          cleanup() {
+            if [ -n "$frontend_pid" ]; then kill "$frontend_pid" 2>/dev/null || true; fi
+            if [ -n "$backend_pid" ]; then kill "$backend_pid" 2>/dev/null || true; wait "$backend_pid" || true; fi
+            dropdb -h localhost -U postgres --force "$database"
+          }
+          trap cleanup EXIT
+          echo "Destino E2E: PostgreSQL 16 localhost:5432/$database; uploads em RUNNER_TEMP"
+          TEST_DB_URL="jdbc:postgresql://localhost:5432/$database" APP_UPLOAD_DIR="$RUNNER_TEMP/poprc-e2e-uploads" \
+            java -jar target/demo-0.0.1-SNAPSHOT.jar --spring.config.import= --spring.profiles.active=test \
+              --server.address=127.0.0.1 --server.port=8087 --app.security.enabled=true \
+              --app.security.dev-login-enabled=false --app.ambiente=homologacao \
+              --app.documentos.simulacao-enabled=true > "$RUNNER_TEMP/backend-e2e.log" 2>&1 &
+          backend_pid=$!
+          (cd frontend && VITE_PROXY_TARGET=http://127.0.0.1:8087 npm run dev -- --host 127.0.0.1 --port 5177) > "$RUNNER_TEMP/frontend-e2e.log" 2>&1 &
+          frontend_pid=$!
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8087/api/auth/config >/dev/null && curl -fsS http://127.0.0.1:5177 >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8087/api/auth/config
+          cd frontend
+          npx playwright test
+
+      - name: Guardar resultados e evidencias de teste
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-pg16-e-captura-teste
+          path: |
+            target/surefire-reports
+            target/simulacao-pdf-review
+            frontend/test-results
+            frontend/playwright-report
+            ${{ runner.temp }}/backend-e2e.log
+            ${{ runner.temp }}/frontend-e2e.log
 
   containers:
     name: Containers Dokploy
@@ -94,19 +156,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Exportar contexto da revisao realmente selecionada
+        shell: pwsh
+        run: |
+          $sha = (git rev-parse HEAD).Trim()
+          Write-Host "Revisao efetiva do checkout: $sha"
+          Write-Host "HEAD do PR: ${{ github.event.pull_request.head.sha }}"
+          ./scripts/prepare-build-revision.ps1 -Revision $sha -ContextDirectory (Join-Path $env:RUNNER_TEMP 'poprc-build-context') | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Validar Docker Compose
-        run: docker compose -f compose.dokploy.yml config --quiet
+        run: |
+          test ! -e "$BUILD_CONTEXT/.git"
+          docker compose -f "$BUILD_CONTEXT/compose.dokploy.yml" config --quiet
+          if env -u APP_REVISION docker compose -f "$BUILD_CONTEXT/compose.dokploy.yml" config --quiet; then
+            echo 'Compose aceitou revisao ausente'; exit 1
+          fi
 
       - name: Construir imagem do backend
-        run: docker build --file deploy/docker/backend.Dockerfile --tag poprc-backend:ci .
+        run: docker build --file "$BUILD_CONTEXT/deploy/docker/backend.Dockerfile" --tag poprc-backend:ci "$BUILD_CONTEXT"
 
       - name: Construir imagem do frontend
         run: >-
           docker build
-          --file deploy/docker/frontend.Dockerfile
-          --build-arg VITE_APP_REVISION=${GITHUB_SHA::8}
+          --file "$BUILD_CONTEXT/deploy/docker/frontend.Dockerfile"
+          --build-arg VITE_APP_REVISION=${APP_REVISION}
           --tag poprc-frontend:ci
-          .
+          "$BUILD_CONTEXT"
+
+      - name: Conferir label e revisao incorporada ao conteudo da imagem
+        run: |
+          test "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' poprc-frontend:ci)" = "$APP_REVISION"
+          docker create --name poprc-inspecao-revisao poprc-frontend:ci
+          docker cp poprc-inspecao-revisao:/usr/share/nginx/html "$RUNNER_TEMP/frontend-compilado"
+          docker rm poprc-inspecao-revisao
+          grep -R -F "$APP_REVISION" "$RUNNER_TEMP/frontend-compilado/assets" >/dev/null
 
       - name: Validar Nginx do frontend
         run: docker run --rm --add-host backend:127.0.0.1 poprc-frontend:ci nginx -t

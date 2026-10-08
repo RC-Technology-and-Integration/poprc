@@ -27,6 +27,9 @@ public class DocumentoInterno {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(nullable = false, updatable = false)
+    private boolean simulacao;
+
     private String tipo;
 
     private String status;
