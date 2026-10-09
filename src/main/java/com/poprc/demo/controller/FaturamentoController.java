@@ -1,6 +1,7 @@
 package com.poprc.demo.controller;
 
 import com.poprc.demo.dto.FaturamentoPainelDTO;
+import com.poprc.demo.dto.FaturamentoMedicaoRequest;
 import com.poprc.demo.model.Faturamento;
 import com.poprc.demo.service.FaturamentoService;
 import lombok.RequiredArgsConstructor;
@@ -39,21 +40,21 @@ public class FaturamentoController {
     }
 
     @PostMapping
-    public ResponseEntity<Faturamento> criarFaturamento(@RequestBody Faturamento faturamento) {
-        Long contratoId = idContrato(faturamento);
-        Long projetoId = idProjeto(faturamento);
-        Long ordemServicoId = idOrdemServico(faturamento);
+    public ResponseEntity<Faturamento> criarFaturamento(@RequestBody FaturamentoMedicaoRequest dados) {
+        Long contratoId = dados.contratoId();
+        Long projetoId = dados.projetoId();
+        Long ordemServicoId = dados.ordemServicoId();
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(faturamentoService.registrarMedicao(
-                        faturamento, contratoId, projetoId, ordemServicoId));
+                        dados.dadosEditaveis(), contratoId, projetoId, ordemServicoId));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<Faturamento> atualizarFaturamento(
             @PathVariable Long id,
-            @RequestBody Faturamento dados) {
+            @RequestBody FaturamentoMedicaoRequest dados) {
         return ResponseEntity.ok(faturamentoService.atualizarMedicao(
-                id, dados, idContrato(dados), idProjeto(dados), idOrdemServico(dados)));
+                id, dados.dadosEditaveis(), dados.contratoId(), dados.projetoId(), dados.ordemServicoId()));
     }
 
     @PutMapping("/{id}/emitir-nota")
@@ -78,24 +79,4 @@ public class FaturamentoController {
         return ResponseEntity.badRequest().body(Map.of("erro", ex.getMessage()));
     }
 
-    private Long idContrato(Faturamento faturamento) {
-        if (faturamento.getContrato() == null || faturamento.getContrato().getId() == null) {
-            throw new IllegalArgumentException("O contrato é obrigatório.");
-        }
-        return faturamento.getContrato().getId();
-    }
-
-    private Long idProjeto(Faturamento faturamento) {
-        if (faturamento.getProjeto() == null || faturamento.getProjeto().getId() == null) {
-            throw new IllegalArgumentException("O projeto é obrigatório.");
-        }
-        return faturamento.getProjeto().getId();
-    }
-
-    private Long idOrdemServico(Faturamento faturamento) {
-        if (faturamento.getOrdemServico() == null || faturamento.getOrdemServico().getId() == null) {
-            throw new IllegalArgumentException("A Ordem de Serviço concluída é obrigatória.");
-        }
-        return faturamento.getOrdemServico().getId();
-    }
 }
