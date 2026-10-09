@@ -4,9 +4,10 @@ import com.poprc.demo.model.*;
 import com.poprc.demo.repository.*;
 import com.poprc.demo.security.*;
 import jakarta.persistence.EntityManager;
+import jakarta.servlet.http.Cookie;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -14,8 +15,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.mock.web.MockHttpSession;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.session.SessionRepository;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -40,24 +42,40 @@ class FaturamentoMedicaoIntegrationTest {
     @Autowired EntityManager em;
     @Autowired JdbcTemplate jdbc;
     @Autowired tools.jackson.databind.ObjectMapper mapper;
+    @Autowired PasswordEncoder passwordEncoder;
+    @Autowired SessionRepository<?> sessoes;
     private Contrato contrato;
     private Projeto projeto;
     private OrdemServico os;
     private UsernamePasswordAuthenticationToken auth;
-    private MockHttpSession sessao;
+    private Cookie sessao;
 
-    @BeforeEach void preparar() {
+    @BeforeEach void preparar() throws Exception {
         var admin = new Funcionario(); admin.setNome("TESTE ADMIN");
         admin.setEmail("teste-" + UUID.randomUUID() + "@example.invalid");
+        admin.setCpf("11144477735");
+        admin.setSenhaHash(passwordEncoder.encode("TemporariaTeste123"));
         admin.setPerfilAcesso(PerfilAcesso.ADMIN); admin = funcionarios.save(admin);
         var principal = UsuarioAutenticado.de(admin);
         auth = new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
-        sessao = new MockHttpSession();
-        sessao.setAttribute(SessaoAutenticacaoService.REAUTENTICADO_EM, Instant.now());
+        // O filtro Spring Session usa o repositório JDBC e ignora MockHttpSession.
+        // O login real estabelece a identidade e a reautenticação na sessão persistida.
+        sessao = mvc.perform(post("/api/auth/login").contentType("application/json")
+                .content("{\"cpf\":\"11144477735\",\"senha\":\"TemporariaTeste123\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getCookie("SESSION");
+        assertNotNull(sessao);
         contrato = new Contrato(); contrato.setContrato("TESTE-" + UUID.randomUUID());
         contrato = contratos.save(contrato);
         projeto = new Projeto(); projeto.setContrato(contrato); projeto = projetos.save(projeto);
         os = criarOs(true);
+    }
+
+    @AfterEach void removerSessaoDescartavel() {
+        if (sessao != null) {
+            String id = new String(java.util.Base64.getDecoder().decode(sessao.getValue()),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            sessoes.deleteById(id);
+        }
     }
 
     @ParameterizedTest
@@ -65,15 +83,15 @@ class FaturamentoMedicaoIntegrationTest {
     void criaEEditaPorIdComMapperRealEPersistencia(boolean simulacaoPersistida) throws Exception {
         if (!simulacaoPersistida) os = criarOs(false);
         long antes = faturamentos.count();
-        String resposta = mvc.perform(post("/api/faturamentos").with(authentication(auth)).with(csrf())
-                .session(sessao).contentType("application/json").content(payload("1")))
+        String resposta = mvc.perform(post("/api/faturamentos").with(csrf())
+                .cookie(sessao).contentType("application/json").content(payload("1")))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.situacao").value("A_FATURAR"))
                 .andReturn().getResponse().getContentAsString();
         Long id = mapper.readTree(resposta).get("id").longValue();
         em.flush(); em.clear();
         assertEquals(antes + 1, faturamentos.count());
         assertEquals(simulacaoPersistida, faturamentos.findById(id).orElseThrow().getOrdemServico().isSimulacao());
-        mvc.perform(put("/api/faturamentos/" + id).with(authentication(auth)).with(csrf()).session(sessao)
+        mvc.perform(put("/api/faturamentos/" + id).with(csrf()).cookie(sessao)
                 .contentType("application/json").content(payload("2"))).andExpect(status().isOk());
         em.flush(); em.clear();
         // Campos extras são descartados; nunca são copiados para a entidade persistida.
@@ -85,7 +103,7 @@ class FaturamentoMedicaoIntegrationTest {
                         + "\"dataPagamento\":\"2030-01-02\",\"competenciaFiscal\":\"2030-02-20\","
                         + "\"aliquotaImpostoRetido\":1,\"aliquotaImpostoPagar\":1,"
                         + "\"impostoRetido\":99,\"impostoPagar\":99,\"impostoTotal\":198,\"valorMedicao\"");
-        mvc.perform(put("/api/faturamentos/" + id).with(authentication(auth)).with(csrf()).session(sessao)
+        mvc.perform(put("/api/faturamentos/" + id).with(csrf()).cookie(sessao)
                 .contentType("application/json").content(ataque)).andExpect(status().isOk());
         em.flush(); em.clear();
         var salvo = faturamentos.findById(id).orElseThrow();
@@ -96,8 +114,8 @@ class FaturamentoMedicaoIntegrationTest {
         assertEquals(StatusOS.CONCLUIDA, salvo.getOrdemServico().getStatus());
         assertFalse(salvo.getOrdemServico().getArquivado());
         assertCamposFiscaisNulos(salvo);
-        String outraResposta = mvc.perform(post("/api/faturamentos").with(authentication(auth)).with(csrf())
-                .session(sessao).contentType("application/json").content(ataque))
+        String outraResposta = mvc.perform(post("/api/faturamentos").with(csrf())
+                .cookie(sessao).contentType("application/json").content(ataque))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         Long outroId = mapper.readTree(outraResposta).get("id").longValue();
         assertNotEquals(999999L, outroId);
@@ -117,7 +135,7 @@ class FaturamentoMedicaoIntegrationTest {
         Long id = existente.getId();
         long antes = faturamentos.count();
         for (String corpo : new String[]{payload("0"), payload("1").replace("\"id\":" + contrato.getId(), "\"id\":999999"), "{"}) {
-            mvc.perform(post("/api/faturamentos").with(authentication(auth)).with(csrf()).session(sessao)
+            mvc.perform(post("/api/faturamentos").with(csrf()).cookie(sessao)
                     .contentType("application/json").content(corpo)).andExpect(status().isBadRequest());
         }
         for (String perfil : new String[]{"TECNICO", "ESTOQUE", "AUDITOR", "SUPERVISOR_TECNICO"}) {
@@ -135,7 +153,7 @@ class FaturamentoMedicaoIntegrationTest {
             var snapshot = jdbc.queryForList("SELECT * FROM faturamentos ORDER BY id");
             mvc.perform((editar ? put(rota) : post(rota)).with(authentication(auth)).with(csrf())
                     .contentType("application/json").content(payload("1"))).andExpect(status().is(428));
-            mvc.perform((editar ? put(rota) : post(rota)).with(authentication(auth)).session(sessao)
+            mvc.perform((editar ? put(rota) : post(rota)).cookie(sessao)
                     .contentType("application/json").content(payload("1"))).andExpect(status().isForbidden());
             mvc.perform((editar ? put(rota) : post(rota)).with(csrf())
                     .contentType("application/json").content(payload("1"))).andExpect(status().isUnauthorized());
@@ -187,7 +205,7 @@ class FaturamentoMedicaoIntegrationTest {
         for (var pedido : new org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder[]{
                 post("/api/faturamentos"), put("/api/faturamentos/" + id)}) {
             var antes = jdbc.queryForList("SELECT * FROM faturamentos ORDER BY id");
-            mvc.perform(pedido.with(authentication(auth)).with(csrf()).session(sessao)
+            mvc.perform(pedido.with(csrf()).cookie(sessao)
                     .contentType("application/json").content(corpo)).andExpect(status().isBadRequest());
             em.flush();
             assertEquals(antes, jdbc.queryForList("SELECT * FROM faturamentos ORDER BY id"));
@@ -200,8 +218,8 @@ class FaturamentoMedicaoIntegrationTest {
         existente.setSituacao(SituacaoFaturamento.FATURADO);
         existente = faturamentos.saveAndFlush(existente);
         var antes = jdbc.queryForList("SELECT * FROM faturamentos ORDER BY id");
-        mvc.perform(put("/api/faturamentos/" + existente.getId()).with(authentication(auth)).with(csrf())
-                .session(sessao).contentType("application/json").content(payload("1")))
+        mvc.perform(put("/api/faturamentos/" + existente.getId()).with(csrf())
+                .cookie(sessao).contentType("application/json").content(payload("1")))
                 .andExpect(status().isBadRequest());
         em.flush(); em.clear();
         assertEquals(antes, jdbc.queryForList("SELECT * FROM faturamentos ORDER BY id"));
