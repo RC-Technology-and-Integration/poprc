@@ -103,7 +103,7 @@ export default function AuditoriaMateriaisEAsBuilt() {
 
   const reabrirAsBuilt = async () => {
     const confirmar = window.confirm(
-      "Reabrir este As-Built vai estornar a baixa no estoque e recriar a reserva dos materiais previstos. Deseja continuar?",
+      "Reabrir o As-Built para ajuste? As movimentações de estoque existentes serão preservadas.",
     );
     if (!confirmar) return;
 
@@ -117,7 +117,7 @@ export default function AuditoriaMateriaisEAsBuilt() {
       );
       setRastreabilidade(rastreabilidadeResponse.data);
       setError(null);
-      setSuccess("As-Built reaberto para ajuste e baixa estornada no estoque.");
+      setSuccess("As-Built reaberto para ajuste.");
     } catch (err) {
       setError(
         getApiErrorMessage(err, "Erro ao reabrir As-Built. Verifique o status atual da OS."),
