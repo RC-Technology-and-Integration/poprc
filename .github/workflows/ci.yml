@@ -85,6 +85,18 @@ jobs:
       - name: Validar V1-V40, V38-V40 e somente V40 sobre V39 no PostgreSQL 16
         run: ./mvnw --batch-mode -Dspring.config.import= -Dpoprc.pg16.migration=true -Dtest=Postgres16MigrationCiTest,SimulacaoMigrationTest test
 
+      - name: Executar abertura em banco exclusivo com Java 25 e PostgreSQL 16
+        run: |
+          ./mvnw --batch-mode -Dspring.config.import= -Dtest=EnsaioAberturaEstoqueTest test
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse('target/surefire-reports/TEST-com.poprc.demo.integration.EnsaioAberturaEstoqueTest.xml').getroot()
+          assert {key: int(report.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')} == {'tests': 11, 'failures': 0, 'errors': 0, 'skipped': 0}, report.attrib
+          PY
+          mkdir -p target/abertura-ci
+          cp target/surefire-reports/*EnsaioAberturaEstoqueTest* target/abertura-ci/
+          printf 'PR_HEAD=%s\nTESTED_SHA=%s\n' '${{ github.event.pull_request.head.sha }}' "$(git rev-parse HEAD)" > target/abertura-ci/revisoes.txt
+
       - name: Executar suite completa e empacotar backend
         run: ./mvnw --batch-mode -Dspring.config.import= verify
 
@@ -138,6 +150,7 @@ jobs:
           name: backend-pg16-e-captura-teste
           path: |
             target/surefire-reports
+            target/abertura-ci
             target/simulacao-pdf-review
             frontend/test-results
             frontend/playwright-report
