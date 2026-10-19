@@ -97,6 +97,31 @@ jobs:
           cp target/surefire-reports/*EnsaioAberturaEstoqueTest* target/abertura-ci/
           printf 'PR_HEAD=%s\nTESTED_SHA=%s\n' '${{ github.event.pull_request.head.sha }}' "$(git rev-parse HEAD)" > target/abertura-ci/revisoes.txt
 
+      - name: Validar entrada FRACIONADO por HTTP e contratos com Java 25 e PostgreSQL 16
+        run: |
+          java -version
+          PGPASSWORD="$TEST_DB_PASSWORD" psql -h localhost -U "$TEST_DB_USERNAME" -d poprc_test -X -A -t -c 'select version()'
+          ./mvnw --batch-mode -Dspring.config.import= -Dtest=EntradaFracionadoIntegrationTest,EntradaEstoqueRequestTest,ImportacaoNotaFiscalEstoqueServiceTest,EstoqueServiceTest test
+          python3 - <<'PY'
+          import pathlib
+          import shutil
+          import xml.etree.ElementTree as ET
+          output = pathlib.Path('target/r01-ci')
+          output.mkdir(parents=True, exist_ok=True)
+          expected = {
+              'integration.EntradaFracionadoIntegrationTest': 9,
+              'controller.EntradaEstoqueRequestTest': 22,
+              'service.ImportacaoNotaFiscalEstoqueServiceTest': 7,
+              'service.EstoqueServiceTest': 5,
+          }
+          for test, count in expected.items():
+              report = pathlib.Path(f'target/surefire-reports/TEST-com.poprc.demo.{test}.xml')
+              result = ET.parse(report).getroot()
+              assert {key: int(result.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')} == {'tests': count, 'failures': 0, 'errors': 0, 'skipped': 0}, result.attrib
+              shutil.copy2(report, output)
+          PY
+          printf 'PR_HEAD=%s\nTESTED_SHA=%s\n' '${{ github.event.pull_request.head.sha }}' "$(git rev-parse HEAD)" > target/r01-ci/revisoes.txt
+
       - name: Executar suite completa e empacotar backend
         run: ./mvnw --batch-mode -Dspring.config.import= verify
 
@@ -151,6 +176,7 @@ jobs:
           path: |
             target/surefire-reports
             target/abertura-ci
+            target/r01-ci
             target/simulacao-pdf-review
             frontend/test-results
             frontend/playwright-report

@@ -137,7 +137,8 @@ public class ImportacaoNotaFiscalEstoqueService {
                 acao = "MATERIAL_CRIADO";
             }
 
-            boolean metragem = TipoControleEstoque.METRAGEM.equals(material.getTipoControle());
+            boolean metragem = TipoControleEstoque.METRAGEM.equals(material.getTipoControle())
+                    || TipoControleEstoque.FRACIONADO.equals(material.getTipoControle());
             Integer quantidade = metragem ? null : inteiroExato(item.quantidade());
             BigDecimal metros = metragem ? item.quantidade() : null;
             estoqueService.registrarEntradaNotaFiscal(

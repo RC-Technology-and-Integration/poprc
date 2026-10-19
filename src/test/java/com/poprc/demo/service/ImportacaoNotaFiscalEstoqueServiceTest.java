@@ -20,6 +20,13 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.test.util.ReflectionTestUtils;
+import com.poprc.demo.model.Funcionario;
+import com.poprc.demo.model.TipoControleEstoque;
+import java.nio.file.Path;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -32,6 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
 
 class ImportacaoNotaFiscalEstoqueServiceTest {
     private ImportacaoNotaFiscalRepository importacaoRepository;
@@ -41,6 +50,7 @@ class ImportacaoNotaFiscalEstoqueServiceTest {
     private LocalEstoqueRepository localRepository;
     private EstoqueService estoqueService;
     private ImportacaoNotaFiscalEstoqueService service;
+    @TempDir Path uploads;
 
     @BeforeEach
     void setUp() {
@@ -53,6 +63,38 @@ class ImportacaoNotaFiscalEstoqueServiceTest {
         service = new ImportacaoNotaFiscalEstoqueService(
                 importacaoRepository, itemRepository, materialRepository,
                 funcionarioRepository, localRepository, estoqueService);
+        ReflectionTestUtils.setField(service, "uploadDir", uploads.toString());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TipoControleEstoque.class, names = {"FRACIONADO", "METRAGEM", "UNIDADE"})
+    void deveConfirmarNotaVinculadaUsandoOEixoDeQuantidadeDoMaterial(TipoControleEstoque tipo) {
+        var arquivo = arquivoXml();
+        var preview = service.analisar(arquivo);
+        var funcionario = new Funcionario(); funcionario.setId(1L); funcionario.setNome("TESTE NF");
+        var local = new LocalEstoque(); local.setId(3L); local.setAtivo(true);
+        var material = new Material(); material.setId(7L); material.setTipoControle(tipo);
+        when(funcionarioRepository.findById(1L)).thenReturn(Optional.of(funcionario));
+        when(localRepository.findById(3L)).thenReturn(Optional.of(local));
+        when(materialRepository.findById(7L)).thenReturn(Optional.of(material));
+        when(importacaoRepository.save(any())).thenAnswer(invocation -> {
+            ImportacaoNotaFiscal nota = invocation.getArgument(0); nota.setId(9L); return nota;
+        });
+        boolean decimal = tipo != TipoControleEstoque.UNIDADE;
+        BigDecimal quantidade = new BigDecimal(decimal ? "0.125" : "2");
+        BigDecimal custo = new BigDecimal("1.2345");
+        var item = new NotaFiscalEstoqueDTO.ItemConfirmacao(true, 7L, "TESTE", null, null,
+                "TESTE SINTETICO", null, null, "UN", quantidade, custo, null, null, null);
+        var request = new NotaFiscalEstoqueDTO.ConfirmarRequest(arquivo.nomeArquivo(), arquivo.contentType(),
+                arquivo.arquivoBase64(), preview.hashSha256(), 3L, preview.chaveAcesso(), preview.numero(),
+                preview.serie(), preview.emitenteNome(), preview.emitenteCnpj(), preview.dataEmissao(), List.of(item));
+
+        var resultado = service.confirmar(request,
+                new UsuarioAutenticado(1L, "TESTE NF", null, "ADMIN", "CPF_SENHA", false));
+
+        assertEquals(1, resultado.itensProcessados());
+        verify(estoqueService).registrarEntradaNotaFiscal(7L, decimal ? null : 2,
+                decimal ? quantidade : null, custo, 1L, 3L, preview.numero());
     }
 
     @Test
