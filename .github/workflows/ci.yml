@@ -125,6 +125,48 @@ jobs:
       - name: Executar suite completa e empacotar backend
         run: ./mvnw --batch-mode -Dspring.config.import= verify
 
+      - name: Conferir regressoes e jsoup efetivo no JAR
+        run: |
+          mkdir -p target/jsoup-ci
+          ./mvnw --batch-mode -Dspring.config.import= dependency:tree -Dverbose -DoutputFile=target/jsoup-ci/dependency-tree.txt
+          python3 - <<'PY'
+          import hashlib, io, json, os, pathlib, subprocess, zipfile
+          import xml.etree.ElementTree as ET
+          output = pathlib.Path('target/jsoup-ci')
+          tests = {}
+          for name, count in {'AtividadeComarcaSanitizacaoTest': 24, 'JsoupXmlNamespaceRegressionTest': 2}.items():
+              report = ET.parse(f'target/surefire-reports/TEST-com.poprc.demo.service.{name}.xml').getroot()
+              tests[name] = {key: int(report.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
+              assert tests[name] == {'tests': count, 'failures': 0, 'errors': 0, 'skipped': 0}, tests
+              java = next(p.attrib['value'] for p in report.find('properties') if p.attrib['name'] == 'java.version')
+              assert java.startswith('25.'), java
+          tree = (output / 'dependency-tree.txt').read_text()
+          origins = [line for line in tree.splitlines() if 'org.jsoup:jsoup:' in line]
+          assert len(origins) == 1 and 'org.jsoup:jsoup:jar:1.23.2:compile' in origins[0], origins
+          jar = pathlib.Path('target/demo-0.0.1-SNAPSHOT.jar')
+          with zipfile.ZipFile(jar) as app:
+              libraries = [name for name in app.namelist() if name.startswith('BOOT-INF/lib/') and name.endswith('.jar')]
+              copies = []
+              for name in libraries:
+                  with zipfile.ZipFile(io.BytesIO(app.read(name))) as lib:
+                      if any(entry.startswith('org/jsoup/') and entry.endswith('.class') for entry in lib.namelist()):
+                          copies.append(name)
+              assert copies == ['BOOT-INF/lib/jsoup-1.23.2.jar'], copies
+              assert [name for name in libraries if 'jsoup' in name.lower()] == copies
+              embedded = app.read(copies[0])
+          digest = hashlib.sha256(embedded).hexdigest()
+          assert digest == 'e9d8c856856680427f096d156f02a414289985c930998fcb519ce5be39b42003', digest
+          (output / 'jsoup-1.23.2.jar').write_bytes(embedded)
+          result = {'tested_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                    'pr_head': os.environ['PR_HEAD'], 'java': java, 'tests': tests, 'maven_origins': origins,
+                    'jar_sha256': hashlib.sha256(jar.read_bytes()).hexdigest(), 'libraries': libraries,
+                    'jsoup_copies': copies, 'jsoup_sha256': digest}
+          (output / 'verification.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          PY
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+
       - name: Configurar Node.js para captura normal no navegador
         uses: actions/setup-node@v7
         with:
@@ -177,6 +219,7 @@ jobs:
             target/surefire-reports
             target/abertura-ci
             target/r01-ci
+            target/jsoup-ci
             target/simulacao-pdf-review
             frontend/test-results
             frontend/playwright-report
@@ -213,6 +256,50 @@ jobs:
 
       - name: Construir imagem do backend
         run: docker build --file "$BUILD_CONTEXT/deploy/docker/backend.Dockerfile" --tag poprc-backend:ci "$BUILD_CONTEXT"
+
+      - name: Conferir jsoup no backend empacotado na imagem
+        run: |
+          mkdir -p "$RUNNER_TEMP/jsoup-imagem"
+          container=$(docker create poprc-backend:ci)
+          trap 'docker rm "$container" >/dev/null' EXIT
+          docker cp "$container:/app/poprc.jar" "$RUNNER_TEMP/jsoup-imagem/poprc.jar"
+          docker image inspect --format '{{.Id}}' poprc-backend:ci > "$RUNNER_TEMP/jsoup-imagem/image-id.txt"
+          python3 - <<'PY'
+          import hashlib, io, json, os, pathlib, zipfile
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'jsoup-imagem'
+          jar = output / 'poprc.jar'
+          with zipfile.ZipFile(jar) as app:
+              libraries = [name for name in app.namelist() if name.startswith('BOOT-INF/lib/') and name.endswith('.jar')]
+              copies = []
+              for name in libraries:
+                  with zipfile.ZipFile(io.BytesIO(app.read(name))) as lib:
+                      if any(entry.startswith('org/jsoup/') and entry.endswith('.class') for entry in lib.namelist()):
+                          copies.append(name)
+              assert copies == ['BOOT-INF/lib/jsoup-1.23.2.jar'], copies
+              assert [name for name in libraries if 'jsoup' in name.lower()] == copies
+              embedded = app.read(copies[0])
+          digest = hashlib.sha256(embedded).hexdigest()
+          assert digest == 'e9d8c856856680427f096d156f02a414289985c930998fcb519ce5be39b42003', digest
+          (output / 'jsoup-1.23.2.jar').write_bytes(embedded)
+          result = {'tested_sha': os.environ['APP_REVISION'], 'pr_head': os.environ['PR_HEAD'],
+                    'image_id': (output / 'image-id.txt').read_text().strip(),
+                    'jar_sha256': hashlib.sha256(jar.read_bytes()).hexdigest(), 'libraries': libraries,
+                    'jsoup_copies': copies, 'jsoup_sha256': digest}
+          (output / 'verification.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          PY
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+
+      - name: Guardar evidencia do jsoup na imagem
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-imagem-jsoup
+          path: |
+            ${{ runner.temp }}/jsoup-imagem/verification.json
+            ${{ runner.temp }}/jsoup-imagem/image-id.txt
+            ${{ runner.temp }}/jsoup-imagem/jsoup-1.23.2.jar
 
       - name: Construir imagem do frontend
         run: >-
