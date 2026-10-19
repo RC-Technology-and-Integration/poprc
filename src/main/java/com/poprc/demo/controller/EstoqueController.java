@@ -318,6 +318,15 @@ public class EstoqueController {
         private BigDecimal custoUnitarioEntrada;
         private Long funcionarioId;
         private Long localEstoqueId;
+
+        // Preserve the integer contract without Jackson silently truncating a decimal JSON value.
+        public void setQuantidade(BigDecimal quantidade) {
+            try {
+                this.quantidade = quantidade == null ? null : quantidade.intValueExact();
+            } catch (ArithmeticException exception) {
+                throw new IllegalArgumentException("A quantidade de entrada por unidade precisa ser inteira.");
+            }
+        }
     }
 
     @Data

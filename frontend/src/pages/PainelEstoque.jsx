@@ -1759,14 +1759,15 @@ export default function PainelEstoque() {
   const handleSubmitEntrada = async (e) => {
     e.preventDefault();
     try {
+      const entradaDecimal = ["FRACIONADO", "METRAGEM"].includes(materialEntradaSelecionado?.tipoControle);
       await api.post("/estoque/entrada", {
         materialId: parseInt(formData.materialId),
         quantidade:
-          materialEntradaSelecionado?.tipoControle === "METRAGEM"
+          entradaDecimal
             ? null
             : parseInt(formData.quantidade, 10),
         metragem:
-          materialEntradaSelecionado?.tipoControle === "METRAGEM"
+          entradaDecimal
             ? parseFloat(formData.quantidade)
             : null,
         custoUnitarioEntrada:
@@ -6433,6 +6434,8 @@ export default function PainelEstoque() {
             <label className="block text-sm font-semibold text-slate-700 mb-1">
               {materialEntradaSelecionado?.tipoControle === "METRAGEM"
                 ? "Metragem"
+                : materialEntradaSelecionado?.tipoControle === "FRACIONADO"
+                ? `Quantidade (${unidadeMaterial(materialEntradaSelecionado)})`
                 : "Quantidade"}
             </label>
             <input
@@ -6440,8 +6443,8 @@ export default function PainelEstoque() {
               name="quantidade"
               value={formData.quantidade}
               onChange={handleInputChange}
-              min={materialEntradaSelecionado?.tipoControle === "METRAGEM" ? "0.001" : "1"}
-              step={materialEntradaSelecionado?.tipoControle === "METRAGEM" ? "0.001" : "1"}
+              min={["FRACIONADO", "METRAGEM"].includes(materialEntradaSelecionado?.tipoControle) ? "0.001" : "1"}
+              step={["FRACIONADO", "METRAGEM"].includes(materialEntradaSelecionado?.tipoControle) ? "0.001" : "1"}
               required
               className="w-full px-4 py-2 border border-slate-300 rounded-lg"
             />
