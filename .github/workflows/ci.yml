@@ -97,11 +97,11 @@ jobs:
           cp target/surefire-reports/*EnsaioAberturaEstoqueTest* target/abertura-ci/
           printf 'PR_HEAD=%s\nTESTED_SHA=%s\n' '${{ github.event.pull_request.head.sha }}' "$(git rev-parse HEAD)" > target/abertura-ci/revisoes.txt
 
-      - name: Validar entrada FRACIONADO por HTTP e contratos com Java 25 e PostgreSQL 16
+      - name: Validar entrada e cadastro FRACIONADO por HTTP e contratos com Java 25 e PostgreSQL 16
         run: |
           java -version
           PGPASSWORD="$TEST_DB_PASSWORD" psql -h localhost -U "$TEST_DB_USERNAME" -d poprc_test -X -A -t -c 'select version()'
-          ./mvnw --batch-mode -Dspring.config.import= -Dtest=EntradaFracionadoIntegrationTest,EntradaEstoqueRequestTest,ImportacaoNotaFiscalEstoqueServiceTest,EstoqueServiceTest test
+          ./mvnw --batch-mode -Dspring.config.import= -Dtest=EntradaFracionadoIntegrationTest,EntradaEstoqueRequestTest,ImportacaoNotaFiscalEstoqueServiceTest,EstoqueServiceTest,CadastroMaterialIntegrationTest,CadastroMaterialRequestTest test
           python3 - <<'PY'
           import pathlib
           import shutil
@@ -113,6 +113,8 @@ jobs:
               'controller.EntradaEstoqueRequestTest': 22,
               'service.ImportacaoNotaFiscalEstoqueServiceTest': 7,
               'service.EstoqueServiceTest': 5,
+              'integration.CadastroMaterialIntegrationTest': 11,
+              'controller.CadastroMaterialRequestTest': 19,
           }
           for test, count in expected.items():
               report = pathlib.Path(f'target/surefire-reports/TEST-com.poprc.demo.{test}.xml')
