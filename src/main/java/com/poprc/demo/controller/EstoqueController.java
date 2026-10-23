@@ -23,6 +23,7 @@ import com.poprc.demo.service.ImportacaoEstoquePlanilhaService;
 import com.poprc.demo.service.ImportacaoNotaFiscalEstoqueService;
 import com.poprc.demo.service.ReconciliacaoRetiradaPlanilhaService;
 import com.poprc.demo.security.UsuarioAutenticado;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.RequiredArgsConstructor;
 import lombok.Data;
 import org.springframework.http.HttpStatus;
@@ -32,6 +33,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
+import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
@@ -69,7 +71,9 @@ public class EstoqueController {
     }
 
     @PostMapping("/materiais")
-    public ResponseEntity<Material> cadastrarNovoMaterial(@RequestBody Material material) {
+    public ResponseEntity<Material> cadastrarNovoMaterial(@RequestBody CadastroMaterialRequest request) {
+        Material material = new Material();
+        BeanUtils.copyProperties(request, material);
         Material salvo = estoqueService.cadastrarMaterial(material);
         return ResponseEntity.status(HttpStatus.CREATED).body(salvo);
     }
@@ -308,6 +312,31 @@ public class EstoqueController {
             @PathVariable Long id, @RequestBody TransferenciaUnidadeRequest request) {
         return ResponseEntity.ok(unidadeRastreavelService.transferir(
                 id, request.getDestinoId(), request.getMotivo(), request.getLancadoPor(), request.getAutorizadoPor()));
+    }
+
+    // Scoped to POST cadastro: keep Material/Jackson and PUT saldo semantics unchanged.
+    public static class CadastroMaterialRequest extends Material {
+        public CadastroMaterialRequest() {
+            // Material's former JSON constructor leaves absent fields null; the service supplies defaults.
+            setCategoria(null);
+            setQuantidadeReservada(null);
+            setTipoControle(null);
+            setUnidadeMedida(null);
+            setMetragemDisponivel(null);
+            setMetragemReservada(null);
+            setEstoqueMinimo(null);
+            setCustoMedio(null);
+            setAtivo(null);
+        }
+
+        @JsonSetter("quantidadeDisponivel")
+        public void receberQuantidadeInicial(BigDecimal quantidade) {
+            try {
+                super.setQuantidadeDisponivel(quantidade == null ? null : quantidade.intValueExact());
+            } catch (ArithmeticException exception) {
+                throw new IllegalArgumentException("A quantidade inicial por unidade precisa ser inteira.");
+            }
+        }
     }
 
     @Data

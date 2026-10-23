@@ -1726,14 +1726,17 @@ export default function PainelEstoque() {
   const handleSubmitNovoMaterial = async (e) => {
     e.preventDefault();
     try {
+      const cadastroDecimal = ["FRACIONADO", "METRAGEM"].includes(novoMaterialData.tipoControle);
+      const quantidadeInicial = Number(novoMaterialData.quantidadeDisponivel || 0);
+      if (!cadastroDecimal && !Number.isInteger(quantidadeInicial)) {
+        throw new Error("A quantidade inicial deve ser um número inteiro.");
+      }
       const payload = {
         ...novoMaterialData,
-        quantidadeDisponivel:
-          parseInt(novoMaterialData.quantidadeDisponivel, 10) || 0,
+        quantidadeDisponivel: cadastroDecimal ? 0 : quantidadeInicial,
         comprimentoPorPeca:
           parseFloat(novoMaterialData.comprimentoPorPeca) || null,
-        metragemDisponivel:
-          parseFloat(novoMaterialData.metragemDisponivel) || 0,
+        metragemDisponivel: cadastroDecimal ? Number(novoMaterialData.metragemDisponivel || 0) : 0,
         estoqueMinimo: parseFloat(novoMaterialData.estoqueMinimo) || 0,
         custoMedio: parseFloat(novoMaterialData.custoMedio) || 0,
       };
@@ -2440,8 +2443,18 @@ export default function PainelEstoque() {
     setEstoqueFaltaMinima("");
     setEstoqueOrdenacao("NOME_ASC");
   };
-  const valorMovimentacao = (mov) =>
-    mov.metragem != null ? `${formatarNumero(mov.metragem)} m` : `${mov.quantidade ?? 0} un`;
+  const valorMovimentacao = (mov) => {
+    const unidade = UNIDADES_MEDIDA.find((item) => item.value === mov.unidadeMedida)?.label
+      || "(unidade não informada)";
+    // O fluxo rastreável registra comprimento da unidade individual, não contagem de bobinas/rolos.
+    if (mov.unidadeRastreavel && ["BOBINA", "ROLO"].includes(mov.unidadeMedida) && mov.metragem != null) {
+      return `${formatarNumero(mov.metragem)} m (${unidade})`;
+    }
+    // Peças podem ter metragem derivada: a quantidade é o valor expresso em peças.
+    const valor = mov.unidadeMedida === "PECA" && mov.quantidade != null
+      ? mov.quantidade : mov.metragem ?? mov.quantidade ?? 0;
+    return `${formatarNumero(valor)} ${unidade}`;
+  };
   const historicoFiltrado = historico.filter((mov) => {
     const termo = historicoFiltro.trim().toLowerCase();
     const correspondeTipo = !historicoTipoFiltro || mov.tipo === historicoTipoFiltro;
@@ -6237,14 +6250,14 @@ export default function PainelEstoque() {
                 <input
                   type="number"
                   name={
-                    novoMaterialData.tipoControle === "METRAGEM"
+                    ["FRACIONADO", "METRAGEM"].includes(novoMaterialData.tipoControle)
                       ? "metragemDisponivel"
                       : "quantidadeDisponivel"
                   }
                   min="0"
-                  step={novoMaterialData.tipoControle === "METRAGEM" ? "0.001" : "1"}
+                  step={["FRACIONADO", "METRAGEM"].includes(novoMaterialData.tipoControle) ? "0.001" : "1"}
                   value={
-                    novoMaterialData.tipoControle === "METRAGEM"
+                    ["FRACIONADO", "METRAGEM"].includes(novoMaterialData.tipoControle)
                       ? novoMaterialData.metragemDisponivel
                       : novoMaterialData.quantidadeDisponivel
                   }
