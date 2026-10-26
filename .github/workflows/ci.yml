@@ -101,7 +101,7 @@ jobs:
         run: |
           java -version
           PGPASSWORD="$TEST_DB_PASSWORD" psql -h localhost -U "$TEST_DB_USERNAME" -d poprc_test -X -A -t -c 'select version()'
-          ./mvnw --batch-mode -Dspring.config.import= -Dtest=EntradaFracionadoIntegrationTest,EntradaEstoqueRequestTest,ImportacaoNotaFiscalEstoqueServiceTest,EstoqueServiceTest,CadastroMaterialIntegrationTest,CadastroMaterialRequestTest test
+          ./mvnw --batch-mode -Dspring.config.import= -Dtest=EntradaFracionadoIntegrationTest,EntradaEstoqueRequestTest,ImportacaoNotaFiscalEstoqueServiceTest,EstoqueServiceTest,CadastroMaterialIntegrationTest,CadastroMaterialRequestTest,CadastroMaterialEstadoIntegrationTest,CadastroMaterialEstadoServiceTest test
           python3 - <<'PY'
           import pathlib
           import shutil
@@ -114,7 +114,9 @@ jobs:
               'service.ImportacaoNotaFiscalEstoqueServiceTest': 7,
               'service.EstoqueServiceTest': 5,
               'integration.CadastroMaterialIntegrationTest': 11,
-              'controller.CadastroMaterialRequestTest': 19,
+              'controller.CadastroMaterialRequestTest': 36,
+              'integration.CadastroMaterialEstadoIntegrationTest': 70,
+              'service.CadastroMaterialEstadoServiceTest': 10,
           }
           for test, count in expected.items():
               report = pathlib.Path(f'target/surefire-reports/TEST-com.poprc.demo.{test}.xml')
@@ -221,6 +223,7 @@ jobs:
             target/surefire-reports
             target/abertura-ci
             target/r01-ci
+            target/cadastro-post-estado-evidencias
             target/jsoup-ci
             target/simulacao-pdf-review
             frontend/test-results
