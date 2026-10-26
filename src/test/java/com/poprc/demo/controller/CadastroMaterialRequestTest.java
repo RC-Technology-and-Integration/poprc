@@ -22,14 +22,14 @@ class CadastroMaterialRequestTest {
     @ParameterizedTest
     @ValueSource(strings = {"2", "2.0", "\"2\"", "\"2.0\"", "2e0", "0"})
     void inteirosNumericosOuTextuaisSaoConvertidosExatamente(String value) {
-        Material request = (Material) mapper.readValue("{\"quantidadeDisponivel\":" + value + "}", requestType);
+        EstoqueController.CadastroMaterialRequest request = (EstoqueController.CadastroMaterialRequest) mapper.readValue("{\"quantidadeDisponivel\":" + value + "}", requestType);
         assertEquals(value.equals("0") ? 0 : 2, request.getQuantidadeDisponivel());
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"{}", "{\"quantidadeDisponivel\":null}", "{\"quantidadeDisponivel\":\"\"}"})
     void nuloAusenteEVazioMantemContrato(String body) {
-        assertNull(((Material) mapper.readValue(body, requestType)).getQuantidadeDisponivel());
+        assertNull(((EstoqueController.CadastroMaterialRequest) mapper.readValue(body, requestType)).getQuantidadeDisponivel());
     }
 
     @ParameterizedTest
@@ -50,16 +50,43 @@ class CadastroMaterialRequestTest {
     }
 
     @Test
-    void copiaNaoAmpliaCamposControladosJaAceitosPeloCorpoMaterialAnterior() {
-        // Characterizes the existing surface, not an endorsement of client-controlled ID/reservations.
+    void dtoNaoHerdaEntidadeEDefaultsAusentesContinuamNulos() {
+        assertFalse(Material.class.isAssignableFrom(requestType));
+        conferirCopia("{}");
+    }
+
+    @Test
+    void estadoDeCicloDeVidaDoClienteNaoEMapeado() {
         conferirCopia("""
-                {"id":42, "version":7, "quantidadeReservada":2, "metragemReservada":0.375,
-                 "ativo":false, "removidoPor":"TESTE", "restauradoPor":"TESTE"}
+                {"ativo":false, "removidoEm":"2020-01-01T00:00:00", "removidoPor":"CLIENTE",
+                 "restauradoEm":"2020-01-02T00:00:00", "restauradoPor":"CLIENTE"}
                 """);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"\"id\":0", "\"id\":-1", "\"id\":42", "\"version\":0", "\"version\":-1", "\"id\":\"\"", "\"version\":\"\"",
+            "\"quantidadeReservada\":1", "\"quantidadeReservada\":-1", "\"quantidadeReservada\":0.125",
+            "\"quantidadeReservada\":-0.125", "\"metragemReservada\":0.125", "\"metragemReservada\":-0.125"})
+    void estadoIndevidoERejeitadoAntesDeInvocarServico(String field) {
+        var request = mapper.readValue("{" + field + "}", EstoqueController.CadastroMaterialRequest.class);
+        var service = mock(EstoqueService.class);
+        var controller = new EstoqueController(service, null, null, null, null, null, null, null);
+        assertThrows(IllegalArgumentException.class, () -> controller.cadastrarNovoMaterial(request));
+        verifyNoInteractions(service);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"id\":null,\"version\":null}",
+            "{\"quantidadeReservada\":null,\"metragemReservada\":null}",
+            "{\"quantidadeReservada\":0.000,\"metragemReservada\":-0.000}"})
+    void camposNeutrosContinuamCompativeis(String json) { conferirCopia(json); }
+
     private void conferirCopia(String json) {
         Material contratoAnterior = mapper.readValue(json, Material.class);
+        contratoAnterior.setId(null); contratoAnterior.setVersion(null);
+        contratoAnterior.setQuantidadeReservada(0); contratoAnterior.setMetragemReservada(java.math.BigDecimal.ZERO);
+        contratoAnterior.setAtivo(true); contratoAnterior.setRemovidoEm(null); contratoAnterior.setRemovidoPor(null);
+        contratoAnterior.setRestauradoEm(null); contratoAnterior.setRestauradoPor(null);
         var request = mapper.readValue(json, EstoqueController.CadastroMaterialRequest.class);
         var service = mock(EstoqueService.class);
         when(service.cadastrarMaterial(any(Material.class))).thenAnswer(call -> call.getArgument(0));

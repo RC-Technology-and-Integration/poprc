@@ -33,7 +33,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.beans.BeanUtils;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
@@ -72,8 +72,7 @@ public class EstoqueController {
 
     @PostMapping("/materiais")
     public ResponseEntity<Material> cadastrarNovoMaterial(@RequestBody CadastroMaterialRequest request) {
-        Material material = new Material();
-        BeanUtils.copyProperties(request, material);
+        Material material = request.paraMaterial();
         Material salvo = estoqueService.cadastrarMaterial(material);
         return ResponseEntity.status(HttpStatus.CREATED).body(salvo);
     }
@@ -314,28 +313,67 @@ public class EstoqueController {
                 id, request.getDestinoId(), request.getMotivo(), request.getLancadoPor(), request.getAutorizadoPor()));
     }
 
-    // Scoped to POST cadastro: keep Material/Jackson and PUT saldo semantics unchanged.
-    public static class CadastroMaterialRequest extends Material {
-        public CadastroMaterialRequest() {
-            // Material's former JSON constructor leaves absent fields null; the service supplies defaults.
-            setCategoria(null);
-            setQuantidadeReservada(null);
-            setTipoControle(null);
-            setUnidadeMedida(null);
-            setMetragemDisponivel(null);
-            setMetragemReservada(null);
-            setEstoqueMinimo(null);
-            setCustoMedio(null);
-            setAtivo(null);
-        }
+    // POST-only contract. Lifecycle fields remain compatible inputs but never become client-owned state.
+    @Data
+    @JsonIgnoreProperties({"ativo", "removidoEm", "removidoPor", "restauradoEm", "restauradoPor", "valorTotalEstoque"})
+    public static class CadastroMaterialRequest {
+        // Retain the supplied value so Jackson coercion (for example "" -> null) cannot hide it.
+        private Object id;
+        private Object version;
+        private BigDecimal quantidadeReservada;
+        private BigDecimal metragemReservada;
+        private String nome;
+        private String partNumber;
+        private String fabricante;
+        private String fornecedor;
+        private String categoria;
+        private String descricao;
+        private String fotoProdutoUrl;
+        private Integer quantidadeDisponivel;
+        private com.poprc.demo.model.TipoControleEstoque tipoControle;
+        private com.poprc.demo.model.UnidadeMedida unidadeMedida;
+        private String dimensao;
+        private BigDecimal comprimentoPorPeca;
+        private BigDecimal metragemDisponivel;
+        private BigDecimal estoqueMinimo;
+        private BigDecimal custoMedio;
+        private String localizacao;
 
         @JsonSetter("quantidadeDisponivel")
-        public void receberQuantidadeInicial(BigDecimal quantidade) {
+        public void setQuantidadeDisponivel(BigDecimal quantidade) {
             try {
-                super.setQuantidadeDisponivel(quantidade == null ? null : quantidade.intValueExact());
+                quantidadeDisponivel = quantidade == null ? null : quantidade.intValueExact();
             } catch (ArithmeticException exception) {
                 throw new IllegalArgumentException("A quantidade inicial por unidade precisa ser inteira.");
             }
+        }
+
+        Material paraMaterial() {
+            if (id != null || version != null) {
+                throw new IllegalArgumentException("ID e version não podem ser informados no cadastro de material.");
+            }
+            if ((quantidadeReservada != null && quantidadeReservada.signum() != 0)
+                    || (metragemReservada != null && metragemReservada.signum() != 0)) {
+                throw new IllegalArgumentException("As reservas iniciais devem ser zero; utilize o fluxo operacional de reserva.");
+            }
+            Material material = new Material();
+            material.setNome(nome);
+            material.setPartNumber(partNumber);
+            material.setFabricante(fabricante);
+            material.setFornecedor(fornecedor);
+            material.setCategoria(categoria);
+            material.setDescricao(descricao);
+            material.setFotoProdutoUrl(fotoProdutoUrl);
+            material.setQuantidadeDisponivel(quantidadeDisponivel);
+            material.setTipoControle(tipoControle);
+            material.setUnidadeMedida(unidadeMedida);
+            material.setDimensao(dimensao);
+            material.setComprimentoPorPeca(comprimentoPorPeca);
+            material.setMetragemDisponivel(metragemDisponivel);
+            material.setEstoqueMinimo(estoqueMinimo);
+            material.setCustoMedio(custoMedio);
+            material.setLocalizacao(localizacao);
+            return material;
         }
     }
 

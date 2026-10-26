@@ -27,6 +27,17 @@ public class EstoqueService {
 
     @Transactional
     public Material cadastrarMaterial(Material material) {
+        // This entry point creates materials, including when invoked by importers.
+        // Reject before normalizing state or reaching persistence; save must never merge here.
+        if (material.getId() != null || material.getVersion() != null) {
+            throw new IllegalArgumentException("ID e version não podem ser informados no cadastro de material.");
+        }
+        if ((material.getQuantidadeReservada() != null && material.getQuantidadeReservada() != 0)
+                || (material.getMetragemReservada() != null && material.getMetragemReservada().signum() != 0)) {
+            throw new IllegalArgumentException("As reservas iniciais devem ser zero; utilize o fluxo operacional de reserva.");
+        }
+        material.setQuantidadeReservada(0);
+        material.setMetragemReservada(BigDecimal.ZERO);
         material.setAtivo(true);
         material.setRemovidoEm(null);
         material.setRemovidoPor(null);
