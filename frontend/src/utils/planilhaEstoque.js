@@ -193,6 +193,14 @@ const saldoReservadoMaterial = (material) => {
     : reservado;
 };
 
+// No XLSX, fórmulas que exibem vazio podem chegar sem resultado armazenado.
+// Só são uma extensão vazia quando não há dados que exijam identificar o produto.
+const celulaSemConteudoSincronizacao = (celula) => {
+  if (celulaPossuiFormulaSemResultado(celula)) return true;
+  const valor = valorDaCelula(celula);
+  return valor == null || (typeof valor === "string" && !valor.trim());
+};
+
 export const extrairSincronizacaoSaldos = (workbook, materiais = []) => {
   const origem = workbook.worksheets.find(
     (sheet) => normalizarTextoPlanilha(sheet.name) === "estoque atual",
@@ -210,19 +218,35 @@ export const extrairSincronizacaoSaldos = (workbook, materiais = []) => {
   const avisos = [];
 
   for (let linha = cabecalho.linha + 1; linha <= origem.rowCount; linha += 1) {
-    const nome = String(
-      valorDaCelula(origem.getCell(linha, cabecalho.produto)) || "",
-    ).trim();
-    const chave = normalizarTextoPlanilha(nome);
-    if (!chave || chave.startsWith("valor total") || chave === "total geral") continue;
-
+    const celulaNome = origem.getCell(linha, cabecalho.produto);
     const celulaSaldo = origem.getCell(linha, cabecalho.quantidade);
-    const saldoInterpretado = interpretarSaldoPlanilha(nome, valorDaCelula(celulaSaldo));
+    const nomeBruto = valorDaCelula(celulaNome);
+    const nome = typeof nomeBruto === "string" ? nomeBruto.trim() : "";
+    const chave = normalizarTextoPlanilha(nome);
+    if (!chave) {
+      if (celulaSemConteudoSincronizacao(celulaNome)
+        && [celulaSaldo, origem.getCell(linha, cabecalho.custo)]
+          .every(celulaSemConteudoSincronizacao)) continue;
+      avisos.push(`Linha ${linha}: produto ausente ou inválido; confira o nome e o resultado da fórmula na planilha.`);
+      continue;
+    }
+    if (chave.startsWith("valor total") || chave === "total geral") continue;
+
+    const saldoBruto = valorDaCelula(celulaSaldo);
+    const saldoLegivel = !celulaSemConteudoSincronizacao(celulaSaldo)
+      && ["number", "string"].includes(typeof saldoBruto);
+    const saldoInterpretado = interpretarSaldoPlanilha(nome, saldoLegivel ? saldoBruto : NaN);
     const { saldoInformado } = saldoInterpretado;
     const correspondencias = materiaisPorNome.get(chave) || [];
     const material = correspondencias.length === 1 ? correspondencias[0] : null;
     const erros = [];
-    if (!saldoInterpretado.valido) erros.push("Saldo inválido");
+    if (celulaPossuiFormulaSemResultado(celulaSaldo)) {
+      erros.push("Saldo com fórmula sem resultado disponível; recalcule e exporte a planilha");
+    } else if (celulaSemConteudoSincronizacao(celulaSaldo)) {
+      erros.push("Saldo não informado");
+    } else if (!saldoInterpretado.valido) {
+      erros.push("Saldo inválido; confira erros de fórmula ou conteúdo não suportado");
+    }
     if (nomesLidos.has(chave)) erros.push("Material repetido na planilha");
     nomesLidos.add(chave);
     if (correspondencias.length === 0) erros.push("Material não cadastrado no estoque");

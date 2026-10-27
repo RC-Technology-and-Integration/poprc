@@ -16,6 +16,131 @@ import {
   valorDaCelula,
 } from "./planilhaEstoque.js";
 
+const planilhaSaldosSintetica = () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("ESTOQUE ATUAL");
+  sheet.addRow(["Produto", "Estoque atual", "Valor unitário"]);
+  return { workbook, sheet };
+};
+
+const materialSintetico = (id, nome) => ({
+  id, nome, ativo: true, tipoControle: "UNIDADE",
+  quantidadeDisponivel: 3, quantidadeReservada: 0, custoMedio: 2,
+});
+
+test("XLSX sintético preserva 78 produtos e ignora 22 extensões de fórmulas vazias", async () => {
+  const { workbook, sheet } = planilhaSaldosSintetica();
+  const materiais = [];
+  for (let id = 1; id <= 78; id += 1) {
+    const nome = `Produto sintético ${id}`;
+    materiais.push(materialSintetico(id, nome));
+    sheet.addRow([
+      { formula: `"${nome}"`, result: nome },
+      { formula: `${id - 1}`, result: id - 1 },
+      2,
+    ]);
+  }
+  for (let i = 0; i < 22; i += 1) {
+    sheet.addRow([
+      { formula: 'IF(1=1,"","produto")', result: "" },
+      { formula: 'IF(1=1,"",1)', result: "" },
+      { formula: 'IF(1=1,"",2)', result: "" },
+    ]);
+  }
+  const reaberto = new ExcelJS.Workbook();
+  await reaberto.xlsx.load(await workbook.xlsx.writeBuffer());
+  const resultado = extrairSincronizacaoSaldos(reaberto, materiais);
+  assert.equal(resultado.itens.length, 78);
+  assert.deepEqual(resultado.avisos, []);
+  assert.deepEqual(resultado.itens.map(i => i.nome), materiais.map(m => m.nome));
+  assert.deepEqual(resultado.itens.map(i => i.saldoInformado), materiais.map(m => m.id - 1));
+  assert.ok(resultado.itens.every(i => i.erros.length === 0));
+});
+
+for (const [rotulo, valor, mensagem] of [
+  ["vazio", null, /Saldo não informado/],
+  ["texto vazio", "  ", /Saldo não informado/],
+  ["fórmula vazia", { formula: '""', result: "" }, /Saldo não informado/],
+  ["fórmula sem cache", { formula: "B9" }, /fórmula sem resultado disponível/],
+  ["fórmula compartilhada sem cache", { sharedFormula: "B2" }, /fórmula sem resultado disponível/],
+  ["erro de fórmula", { formula: "1/0", result: { error: "#DIV/0!" } }, /Saldo inválido/],
+  ["erro de célula", { error: "#REF!" }, /Saldo inválido/],
+  ["booleano", false, /Saldo inválido/],
+  ["data", new Date("2026-01-01T00:00:00Z"), /Saldo inválido/],
+  ["texto não numérico", "indisponível", /Saldo inválido/],
+]) {
+  test(`sincronização bloqueia saldo obrigatório: ${rotulo}`, () => {
+    const { workbook, sheet } = planilhaSaldosSintetica();
+    sheet.addRow(["Produto sintético", 5, 2]);
+    sheet.addRow(["Outro produto", valor, 2]);
+    const resultado = extrairSincronizacaoSaldos(workbook, [
+      materialSintetico(1, "Produto sintético"), materialSintetico(2, "Outro produto"),
+    ]);
+    assert.equal(resultado.itens.length, 2);
+    assert.equal(resultado.itens[1].acao, "BLOQUEADO");
+    assert.ok(resultado.itens[1].erros.some(e => mensagem.test(e)));
+    assert.ok(resultado.avisos.some(a => a.includes("Linha 3: Outro produto")));
+  });
+}
+
+test("sincronização não oculta linhas sem nome que contêm dados, inclusive zero ou erro", () => {
+  for (const nome of [null, "", { formula: "A9" }, { formula: '""', result: "" },
+    { formula: "A9", result: { error: "#REF!" } }, 12, false]) {
+    const { workbook, sheet } = planilhaSaldosSintetica();
+    sheet.addRow([nome, 0, 2]);
+    const resultado = extrairSincronizacaoSaldos(workbook);
+    assert.deepEqual(resultado.itens, []);
+    assert.match(resultado.avisos[0], /Linha 2: produto ausente ou inválido/);
+    assert.ok(!resultado.avisos.some(a => a.includes("[object Object]")));
+  }
+  const { workbook, sheet } = planilhaSaldosSintetica();
+  sheet.addRow([{ error: "#REF!" }, null, null]);
+  sheet.addRow([null, { error: "#REF!" }, null]);
+  sheet.addRow([null, null, 0]);
+  assert.equal(extrairSincronizacaoSaldos(workbook).avisos.length, 3);
+});
+
+test("sincronização lê nomes de texto e saldos válidos sem perder zero", () => {
+  const { workbook, sheet } = planilhaSaldosSintetica();
+  sheet.addRow([{ richText: [{ text: "Produto " }, { text: "A" }] }, 0, 2]);
+  sheet.addRow([{ text: "Produto B", hyperlink: "https://example.com" }, "12", 2]);
+  sheet.addRow([{ formula: '"Produto C"', result: "Produto C" }, { formula: "0", result: 0 }, 2]);
+  const resultado = extrairSincronizacaoSaldos(workbook, ["A", "B", "C"].map(
+    (letra, i) => materialSintetico(i + 1, `Produto ${letra}`),
+  ));
+  assert.deepEqual(resultado.avisos, []);
+  assert.deepEqual(resultado.itens.map(i => i.saldoInformado), [0, 12, 0]);
+});
+
+test("extensões vazias não removem bloqueios de cadastro, duplicidade, reserva e população", () => {
+  const { workbook, sheet } = planilhaSaldosSintetica();
+  sheet.addRow(["Produto A", 0, 2]);
+  sheet.addRow(["Produto A", 1, 2]);
+  sheet.addRow(["Desconhecido", 1, 2]);
+  sheet.addRow([{ formula: '""' }, { formula: '""' }, { formula: '""' }]);
+  const resultado = extrairSincronizacaoSaldos(workbook, [
+    { ...materialSintetico(1, "Produto A"), quantidadeReservada: 1 },
+    materialSintetico(2, "Ausente"),
+  ]);
+  assert.equal(resultado.itens.length, 3);
+  for (const mensagem of ["reservado", "repetido", "não cadastrado", "Ausente está ativo"]) {
+    assert.ok(resultado.avisos.some(a => a.includes(mensagem)));
+  }
+});
+
+test("contrato do helper mantém fórmulas, erros, textos e datas para os demais consumidores", () => {
+  const data = new Date("2026-01-01T00:00:00Z");
+  for (const valor of [null, 0, "", data, { formula: "B2" },
+    { error: "#REF!" }, { objetoNaoSuportado: true }]) {
+    assert.equal(valorDaCelula({ value: valor }), valor);
+  }
+  assert.equal(valorDaCelula({ value: { formula: "B2", result: 12 } }), 12);
+  assert.equal(valorDaCelula({ value: { formula: "B2", result: 0 } }), 0);
+  assert.equal(valorDaCelula({ value: { formula: "B2", result: "" } }), "");
+  assert.equal(valorDaCelula({ value: { text: "Nome", hyperlink: "https://example.com" } }), "Nome");
+  assert.equal(valorDaCelula({ value: { richText: [{ text: "No" }, { text: "me" }] } }), "Nome");
+});
+
 test("interpreta saldo negativo como falta sem criar estoque negativo", () => {
   assert.deepEqual(interpretarSaldoPlanilha("PORCA GAIOLA", -15), {
     valido: true,
