@@ -17,7 +17,7 @@ export default function ProtectedRoute({ children, roles }) {
     return <Navigate to="/perfil?trocarSenha=1" replace />;
   }
   if (roles && !roles.includes(usuario.perfil)) {
-    return <Navigate to={homePorPerfil(usuario.perfil)} replace />;
+    return <Navigate to={homePorPerfil(usuario.perfil)} replace state={{ acessoNegado: true }} />;
   }
   return children;
 }

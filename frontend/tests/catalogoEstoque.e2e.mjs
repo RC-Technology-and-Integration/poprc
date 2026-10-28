@@ -227,4 +227,32 @@ test('perfil sem permissão não acessa subrota nem consulta estoque',async({pag
  await page.route('**/api/auth/me',r=>r.fulfill({contentType:'application/json',body:JSON.stringify({funcionarioId:999,nome:'TESTE AUDITOR',perfil:'AUDITOR',trocaSenhaObrigatoria:false})}));
  const consultas=[];page.on('request',r=>{if(new URL(r.url()).pathname.startsWith('/api/estoque/'))consultas.push(r.url())});
  await page.reload();await expect(page).not.toHaveURL(/\/estoque/);expect(consultas).toEqual([]);
+ await expect(page.getByRole('alert')).toContainText('Acesso negado. Seu perfil não tem permissão');
+});
+
+
+test('submenu recolhido mantém foco, nomes acessíveis e seção ativa', async ({page}) => {
+ await page.getByRole('button',{name:'Recolher menu lateral',exact:true}).click();
+ // Ativa a modalidade de teclado antes de verificar :focus-visible.
+ await page.keyboard.press('Tab');
+ const nav=page.locator('aside nav');
+ expect(await nav.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+ for(const label of ['Materiais e saldos','Retiradas','Pendências documentais','Histórico','Planilhas e integração']) {
+  const link=page.getByRole('link',{name:label,exact:true});await link.focus();
+  await expect(link).toBeFocused();expect(await link.evaluate(el=>getComputedStyle(el).outlineStyle)).toBe('solid');
+  await page.keyboard.press('Enter');await expect(link).toHaveAttribute('aria-current','page');
+  expect(await nav.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+ }
+ await page.getByRole('button',{name:'Expandir menu lateral',exact:true}).click();
+ await expect(page.locator('.estoque-menu-label').filter({hasText:'Planilhas e integração'})).toBeVisible();
+});
+
+test('custo fracionado usa unidade do material sem mudar o valor',async({page})=>{
+ const first=page.locator('[data-testid=catalogo-cards] article').first();
+ await first.getByRole('button',{name:'Editar TESTE Material 0001',exact:true}).click();
+ const dialog=page.getByRole('dialog');
+ await expect(dialog.getByText('Informe o custo médio por un.',{exact:true})).toBeVisible();
+ await expect(dialog.locator('input[name="custoMedio"]')).toHaveValue('8');
+ await page.keyboard.press('Escape');
+ await expect(page.locator('.catalogo-resumo-rapido').first()).toContainText('R$ 1,00');
 });

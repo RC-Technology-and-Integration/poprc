@@ -63,7 +63,7 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed,
   const { usuario, configuracao, logout } = useAuth();
   const navigate = useNavigate();
   const [estoqueExpandido, setEstoqueExpandido] = useState(false);
-  const secoesEstoque = [['materiais', 'Materiais e saldos'], ['retiradas', 'Retiradas'], ['pendencias', 'Pendências documentais'], ['historico', 'Histórico'], ['integracao', 'Planilhas e integração']];
+  const secoesEstoque = [['materiais', 'Materiais e saldos', 'Mat.'], ['retiradas', 'Retiradas', 'Ret.'], ['pendencias', 'Pendências documentais', 'Doc.'], ['historico', 'Histórico', 'Hist.'], ['integracao', 'Planilhas e integração', 'Plan.']];
   const handleLogout = async () => {
     await logout();
     navigate("/login", { replace: true });
@@ -76,6 +76,7 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed,
   return (
     <>
       <aside
+        data-collapsed={collapsed}
         aria-label="Navegação principal"
         className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-white transition-[width,transform] duration-200 md:visible md:static md:translate-x-0 ${
           collapsed ? "md:w-20" : "md:w-64"
@@ -124,8 +125,8 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed,
                 {secao.itens.map((item) => (
                   <li key={item.path}>
                     {item.path === "/estoque" ? <>
-                      <button type="button" className="estoque-menu-pai" aria-expanded={estoque || estoqueExpandido} aria-controls="estoque-submenu" onClick={() => { setEstoqueExpandido(true); if (collapsed) onToggleCollapsed(); navigate('/estoque/materiais'); }}><Package size={17} /><span>Estoque</span><span aria-hidden="true">⌄</span></button>
-                      {(estoque || estoqueExpandido) && <ul id="estoque-submenu" className="estoque-submenu" aria-label="Seções do estoque">{secoesEstoque.map(([path, label]) => <li key={path}><NavLink to={`/estoque/${path}`} onClick={onClose}>{label}</NavLink></li>)}</ul>}
+                      <button type="button" aria-label="Estoque" title="Estoque — abrir Materiais e saldos" className="estoque-menu-pai" aria-expanded={estoque || estoqueExpandido} aria-controls="estoque-submenu" onClick={() => { setEstoqueExpandido(true); if (collapsed) onToggleCollapsed(); navigate('/estoque/materiais'); }}><Package size={17} /><span>Estoque</span><span aria-hidden="true">⌄</span></button>
+                      {(estoque || estoqueExpandido) && <ul id="estoque-submenu" className="estoque-submenu" aria-label="Seções do estoque">{secoesEstoque.map(([path, label, abreviado]) => <li key={path}><NavLink to={`/estoque/${path}`} aria-label={label} title={label} onClick={onClose}><span className="estoque-menu-label">{label}</span><span className="estoque-menu-abreviado" aria-hidden="true">{abreviado}</span></NavLink></li>)}</ul>}
                     </> : (
                     <NavLink
                       to={item.path}

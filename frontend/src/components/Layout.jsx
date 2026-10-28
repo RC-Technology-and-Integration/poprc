@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
+import Alert from "./Alert";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 
@@ -17,7 +18,7 @@ const sidebarInicial = () => {
 export default function Layout({ children }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(sidebarInicial);
-  const { pathname } = useLocation();
+  const { pathname, state } = useLocation();
   const { usuario } = useAuth();
   const { theme, toggleTheme } = useTheme();
 
@@ -46,6 +47,7 @@ export default function Layout({ children }) {
           onThemeToggle={toggleTheme}
         />
         <main data-layout-main className="min-w-0 flex-1 overflow-auto p-3 sm:p-4 lg:p-6 2xl:p-8">
+          {state?.acessoNegado && <div role="alert" className="mb-4"><Alert type="error" message="Acesso negado. Seu perfil não tem permissão para acessar esta página." /></div>}
           {children}
         </main>
       </div>
