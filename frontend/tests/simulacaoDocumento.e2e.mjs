@@ -105,7 +105,7 @@ test('nova OS fictícia captura TESTE nos documentos, vistoria, retirada e devol
   await api(`comarcas/${comarca.id}/vistoria/foto`, undefined, 'POST', {foto:{name:'TESTE.png',mimeType:'image/png',buffer:fotoTeste}});
   await api(`comarcas/${comarca.id}/avancar-etapa`, {}, 'PATCH');
 
-  await page.goto('/estoque');
+  await page.goto('/estoque/retiradas');
   await page.getByRole('button',{name:'Executar Retirada',exact:true}).click();
   const retirada = page.getByRole('dialog',{name:/Executar Retirada/});
   await expect(retirada.locator('canvas')).toHaveCount(2);
