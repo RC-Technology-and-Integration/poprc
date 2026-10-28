@@ -51,7 +51,9 @@ function App() {
             <Route path="/ordens-servico" element={<Pagina roles={CAMPO}><GestaoOrdensServico /></Pagina>} />
             <Route path="/obras" element={<Pagina roles={OBRAS}><GestaoComarcas /></Pagina>} />
             <Route path="/comarcas" element={<Navigate to="/obras" replace />} />
-            <Route path="/estoque" element={<Pagina roles={ESTOQUE}><PainelEstoque /></Pagina>} />
+            <Route path="/estoque" element={<Navigate to="/estoque/materiais" replace />} />
+            {['materiais', 'retiradas', 'pendencias', 'historico', 'integracao'].map(secao => <Route key={secao} path={`/estoque/${secao}`} element={<Pagina roles={ESTOQUE}><PainelEstoque key={secao} secao={secao} /></Pagina>} />)}
+            <Route path="/estoque/*" element={<Navigate to="/estoque/materiais" replace />} />
             <Route path="/financeiro/lucratividade" element={<Pagina roles={ADMIN}><PainelFinanceiro /></Pagina>} />
             <Route path="/financeiro/faturamento" element={<Pagina roles={ADMIN}><GestaoFaturamento /></Pagina>} />
             <Route path="/logistica/viagens" element={<Pagina roles={ADMIN}><PainelViagensEReembolso /></Pagina>} />

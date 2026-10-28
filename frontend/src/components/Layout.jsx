@@ -30,8 +30,9 @@ export default function Layout({ children }) {
   }, [sidebarCollapsed]);
 
   return (
-    <div className="flex h-dvh bg-slate-50 dark:bg-slate-950">
+    <div className={`flex h-dvh bg-slate-50 dark:bg-slate-950 ${(pathname === "/estoque" || pathname.startsWith("/estoque/")) ? "layout-estoque" : ""}`}>
       <Sidebar
+        estoque={(pathname === "/estoque" || pathname.startsWith("/estoque/"))}
         isOpen={menuOpen}
         onClose={() => setMenuOpen(false)}
         collapsed={sidebarCollapsed}

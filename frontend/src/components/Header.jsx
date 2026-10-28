@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { Bell, Menu, Moon, Sun } from "lucide-react";
 import UserMenu from "./UserMenu";
+import rcLogo from "../assets/rclogo.jpg";
 import { PERMISSOES, temPermissao } from "../security/permissions";
 
 const contextoRotas = [
@@ -37,10 +38,17 @@ export default function Header({ usuario, onMenuClick, theme, onThemeToggle }) {
         >
           <Menu size={20} />
         </button>
+        {(pathname === "/estoque" || pathname.startsWith("/estoque/")) ? (
+          <Link to="/" className="estoque-brand" aria-label="POP RC — Central operacional">
+            <img src={rcLogo} alt="RC Technology" width="44" height="44" />
+            <span>POP RC<small>Operações / Estoque</small></span>
+          </Link>
+        ) : (
         <div className="min-w-0">
           <p className="truncate text-xs font-semibold text-slate-500 dark:text-slate-400">{contexto.area}</p>
           <p className="truncate text-sm font-bold text-slate-900 dark:text-white sm:text-base">{contexto.pagina}</p>
         </div>
+        )}
       </div>
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
