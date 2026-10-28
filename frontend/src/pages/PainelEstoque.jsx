@@ -6392,9 +6392,7 @@ export default function PainelEstoque({ secao = 'materiais' }) {
               placeholder="0,0000"
             />
             <p className="mt-1 text-xs text-slate-500">
-              {["FRACIONADO", "METRAGEM", "BOBINA", "ROLO"].includes(novoMaterialData.tipoControle)
-                ? "Informe o custo médio por metro."
-                : "Informe o custo médio por unidade cadastrada."}
+              {`Informe o custo médio por ${unidadeMaterial(novoMaterialData)}.`}
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_96px] md:items-end">
