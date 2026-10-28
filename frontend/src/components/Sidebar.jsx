@@ -1,3 +1,5 @@
+import "./estoqueNavegacao.css";
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { PERMISSOES, temPermissao } from "../security/permissions";
@@ -57,9 +59,11 @@ const secoesMenu = [
   },
 ];
 
-export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed }) {
+export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed, estoque = false }) {
   const { usuario, configuracao, logout } = useAuth();
   const navigate = useNavigate();
+  const [estoqueExpandido, setEstoqueExpandido] = useState(false);
+  const secoesEstoque = [['materiais', 'Materiais e saldos'], ['retiradas', 'Retiradas'], ['pendencias', 'Pendências documentais'], ['historico', 'Histórico'], ['integracao', 'Planilhas e integração']];
   const handleLogout = async () => {
     await logout();
     navigate("/login", { replace: true });
@@ -84,8 +88,8 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed 
         }`}>
           <img src={rcLogo} alt="RC Technology" className={`shrink-0 rounded object-cover ${collapsed ? "h-10 w-10 md:h-8 md:w-8" : "h-10 w-10"}`} />
           <div className={`min-w-0 flex-1 ${collapsed ? "md:hidden" : ""}`}>
-            <p className="truncate text-sm font-bold text-white">RC Operations Hub</p>
-            <p className="text-xs text-slate-400">Central operacional</p>
+            <p className="truncate text-sm font-bold text-white">{estoque ? "POP RC" : "RC Operations Hub"}</p>
+            <p className="text-xs text-slate-400">{estoque ? "Operações" : "Central operacional"}</p>
           </div>
           <button
             type="button"
@@ -119,6 +123,10 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed 
               <ul className="space-y-0.5">
                 {secao.itens.map((item) => (
                   <li key={item.path}>
+                    {item.path === "/estoque" ? <>
+                      <button type="button" className="estoque-menu-pai" aria-expanded={estoque || estoqueExpandido} aria-controls="estoque-submenu" onClick={() => { setEstoqueExpandido(true); if (collapsed) onToggleCollapsed(); navigate('/estoque/materiais'); }}><Package size={17} /><span>Estoque</span><span aria-hidden="true">⌄</span></button>
+                      {(estoque || estoqueExpandido) && <ul id="estoque-submenu" className="estoque-submenu" aria-label="Seções do estoque">{secoesEstoque.map(([path, label]) => <li key={path}><NavLink to={`/estoque/${path}`} onClick={onClose}>{label}</NavLink></li>)}</ul>}
+                    </> : (
                     <NavLink
                       to={item.path}
                       end={item.end}
@@ -140,6 +148,7 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed 
                         {item.label}
                       </span>
                     </NavLink>
+                    )}
                   </li>
                 ))}
               </ul>

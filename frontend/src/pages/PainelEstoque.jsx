@@ -1,3 +1,6 @@
+import "./catalogoEstoque.css";
+import "./estoqueDesign.css";
+import { CHAVE_VISUAL_CATALOGO, lerPreferenciasCatalogo, indexarSaldosPorMaterial, paginarCatalogo } from "../utils/catalogoEstoque";
 import { MARCA_SIMULACAO } from "../utils/simulacaoDocumento";
 import { Fragment, useState, useEffect, useMemo, useRef } from "react";
 import {
@@ -238,7 +241,13 @@ function SignatureBox({ label, value, onChange, simulacao = false }) {
   );
 }
 
-export default function PainelEstoque() {
+export default function PainelEstoque({ secao = 'materiais' }) {
+  const [erroCarregamento, setErroCarregamento] = useState(null);
+  const materiaisAtivos = secao === 'materiais';
+  const retiradasAtivas = secao === 'retiradas';
+  const historicoAtivo = secao === 'historico';
+  const integracaoAtiva = secao === 'integracao';
+  const tituloSecao = { materiais: 'Materiais e saldos', retiradas: 'Retiradas', pendencias: 'Pendências documentais', historico: 'Histórico', integracao: 'Planilhas e integração' }[secao];
   const { usuario } = useAuth();
   const podeGerenciarEstoque = ["ADMIN", "ESTOQUE"].includes(usuario?.perfil);
   const [materiais, setMateriais] = useState([]);
@@ -266,6 +275,14 @@ export default function PainelEstoque() {
   const [historicoDataInicio, setHistoricoDataInicio] = useState("");
   const [historicoDataFim, setHistoricoDataFim] = useState("");
   const [historicoPessoaFiltro, setHistoricoPessoaFiltro] = useState("");
+  const [catalogoVisual, setCatalogoVisual] = useState(() => {
+    try { return lerPreferenciasCatalogo(window.localStorage); }
+    catch { return { modo: "confortavel", fotos: false }; }
+  });
+  const [catalogoNavegacao, setCatalogoNavegacao] = useState({ filtro: "", pagina: 0 });
+  useEffect(() => {
+    try { window.localStorage.setItem(CHAVE_VISUAL_CATALOGO, JSON.stringify(catalogoVisual)); } catch { /* Preferência opcional. */ }
+  }, [catalogoVisual]);
   const [estoqueBusca, setEstoqueBusca] = useState("");
   const [estoqueCategoriaFiltro, setEstoqueCategoriaFiltro] = useState("");
   const [estoqueSituacaoFiltro, setEstoqueSituacaoFiltro] = useState("");
@@ -397,39 +414,41 @@ export default function PainelEstoque() {
   }, []);
 
   const fetchData = async () => {
+    const consultar = (url, necessario) => necessario ? api.get(url) : Promise.resolve({ data: [] });
     try {
       setLoading(true);
+      setErroCarregamento(null);
       const [materiaisResponse, removidosResponse] = await Promise.all([
-        api.get("/estoque/materiais"),
+        consultar("/estoque/materiais", materiaisAtivos || retiradasAtivas || historicoAtivo || integracaoAtiva),
         podeGerenciarEstoque
-          ? api.get("/estoque/materiais/removidos")
+          ? consultar("/estoque/materiais/removidos", materiaisAtivos)
           : Promise.resolve({ data: [] }),
       ]);
       setMateriais(materiaisResponse.data);
       setMateriaisRemovidos(removidosResponse.data || []);
 
       const [funcionariosResponse, contratosResponse] = await Promise.all([
-        api.get("/funcionarios"),
-        api.get(usuario?.perfil === "ESTOQUE" ? "/contratos/opcoes-estoque" : "/contratos"),
+        consultar("/funcionarios", materiaisAtivos || retiradasAtivas || integracaoAtiva),
+        consultar(usuario?.perfil === "ESTOQUE" ? "/contratos/opcoes-estoque" : "/contratos", materiaisAtivos || retiradasAtivas || integracaoAtiva),
       ]);
       setFuncionarios(funcionariosResponse.data);
       setContratos(contratosResponse.data || []);
 
-      const comarcasResponse = await api.get("/comarcas");
+      const comarcasResponse = await consultar("/comarcas", materiaisAtivos || retiradasAtivas || historicoAtivo || integracaoAtiva);
       setComarcas(comarcasResponse.data);
 
-      const historicoResponse = await api.get("/estoque/historico");
+      const historicoResponse = await consultar("/estoque/historico", historicoAtivo);
       setHistorico(historicoResponse.data);
 
-      const ordensRetiradaResponse = await api.get("/ordens-retirada");
+      const ordensRetiradaResponse = await consultar("/ordens-retirada", retiradasAtivas || historicoAtivo || integracaoAtiva);
       setOrdensRetirada(ordensRetiradaResponse.data || []);
 
-      const unidadesResponse = await api.get("/estoque/unidades-rastreaveis");
+      const unidadesResponse = await consultar("/estoque/unidades-rastreaveis", materiaisAtivos || retiradasAtivas);
       setUnidadesRastreaveis(unidadesResponse.data || []);
 
       const [locaisResponse, saldosResponse] = await Promise.all([
-        api.get("/estoque/locais"),
-        api.get("/estoque/saldos-locais"),
+        consultar("/estoque/locais", materiaisAtivos || retiradasAtivas || historicoAtivo || integracaoAtiva),
+        consultar("/estoque/saldos-locais", materiaisAtivos || retiradasAtivas || historicoAtivo || integracaoAtiva),
       ]);
       setLocaisEstoque(locaisResponse.data || []);
       setSaldosLocais(saldosResponse.data || []);
@@ -440,10 +459,10 @@ export default function PainelEstoque() {
         notasFiscaisResponse,
         reconciliacoesResponse,
       ] = await Promise.all([
-        api.get("/estoque/importacoes/planilha"),
-        api.get("/estoque/importacoes/planilha/retiradas"),
-        api.get("/estoque/importacoes/notas-fiscais"),
-        api.get("/estoque/importacoes/planilha/retiradas/reconciliacoes"),
+        consultar("/estoque/importacoes/planilha", integracaoAtiva),
+        consultar("/estoque/importacoes/planilha/retiradas", materiaisAtivos || retiradasAtivas || historicoAtivo || integracaoAtiva),
+        consultar("/estoque/importacoes/notas-fiscais", integracaoAtiva),
+        consultar("/estoque/importacoes/planilha/retiradas/reconciliacoes", integracaoAtiva),
       ]);
       setImportacoesPlanilha(importacoesResponse.data || []);
       setRetiradasImportadas(retiradasImportadasResponse.data || []);
@@ -452,7 +471,7 @@ export default function PainelEstoque() {
 
       setError(null);
     } catch (err) {
-      setError(getApiErrorMessage(err, "Erro ao carregar dados do estoque."));
+      setErroCarregamento(getApiErrorMessage(err, "Erro ao carregar dados do estoque."));
       console.error(err);
     } finally {
       setLoading(false);
@@ -2266,8 +2285,8 @@ export default function PainelEstoque() {
   const materialEntradaSelecionado = materiais.find(
     (material) => String(material.id) === String(formData.materialId),
   );
-  const saldosDoMaterial = (materialId) =>
-    saldosLocais.filter((saldo) => String(saldo.material?.id) === String(materialId));
+  const saldosPorMaterial = useMemo(() => indexarSaldosPorMaterial(saldosLocais), [saldosLocais]);
+  const saldosDoMaterial = (materialId) => saldosPorMaterial.get(String(materialId)) || [];
   const saldoLocalValor = (saldo) =>
     controlaMetragem(saldo?.material)
       ? Number(saldo?.metragemDisponivel || 0)
@@ -2420,9 +2439,20 @@ export default function PainelEstoque() {
     estoqueFaltaMinima,
     estoqueOrdenacao,
   ]);
+  const catalogoFiltro = JSON.stringify([estoqueBusca, estoqueCategoriaFiltro, estoqueSituacaoFiltro,
+    estoqueDisponivelMinimo, estoqueDisponivelMaximo, estoqueValorMinimo, estoqueValorMaximo,
+    estoqueFaltaMinima, estoqueOrdenacao]);
+  useEffect(() => {
+    setCatalogoNavegacao((atual) => atual.filtro === catalogoFiltro
+      ? atual : { filtro: catalogoFiltro, pagina: 0 });
+  }, [catalogoFiltro]);
+  const catalogoPagina = useMemo(() => paginarCatalogo(materiaisFiltrados,
+    catalogoNavegacao.filtro === catalogoFiltro ? catalogoNavegacao.pagina : 0),
+    [materiaisFiltrados, catalogoNavegacao, catalogoFiltro]);
+  const mudarPaginaCatalogo = (pagina) => setCatalogoNavegacao({ filtro: catalogoFiltro, pagina });
   const materiaisPorCategoria = CATEGORIAS_MATERIAL.map((categoria) => ({
     ...categoria,
-    materiais: materiaisFiltrados.filter(
+    materiais: catalogoPagina.itens.filter(
       (material) => (material.categoria || "MATERIAL_CONSUMO") === categoria.value,
     ),
   }));
@@ -2919,22 +2949,31 @@ export default function PainelEstoque() {
     });
   };
 
-  if (loading) return <LoadingSpinner />;
+  if (loading) return <div role="status" aria-live="polite"><LoadingSpinner /><p>Carregando seção de estoque…</p></div>;
+  if (erroCarregamento) return <section className="estoque-design estoque-catalogo"><h1>{tituloSecao}</h1><Alert type="error" message={erroCarregamento} /><button className="estoque-secondary" onClick={fetchData}>Tentar novamente</button></section>;
 
   return (
-    <div className="estoque-responsive w-full min-w-0 space-y-6 2xl:space-y-8">
+    <div className="estoque-responsive estoque-design w-full min-w-0">
       {/* Header */}
       <div>
-        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="estoque-heading">
           <div>
+            <p className="estoque-eyebrow">MATERIAIS / OPERAÇÃO</p>
             <h1 className="text-3xl font-bold text-slate-800">
-              Estoque de Materiais
+              {tituloSecao}
             </h1>
             <p className="text-slate-600 mt-2">
-              Gerenciamento de entrada e saída de materiais
+              {{materiais:'Visibilidade do estoque, do depósito à entrega.', retiradas:'Execução, devolução e documentos das ordens existentes.', pendencias:'Disponibilidade do fluxo de conferência documental.', historico:'Movimentações, consumo e rastreabilidade.', integracao:'Leitura assistida, prévias e importações existentes.'}[secao]}
             </p>
           </div>
-          <div className="estoque-acoes flex flex-wrap gap-2">
+          <div className="estoque-heading-acoes">
+            {materiaisAtivos && <button type="button" className="estoque-secondary" onClick={abrirModalNovoMaterial}><FolderPlus size={17} /> Novo material</button>}
+            {retiradasAtivas && <button type="button" className="estoque-primary" onClick={abrirPrimeiraOrPendente}><ArrowUpRight size={18} /> Executar OR</button>}
+          </div>
+        </div>
+        {secao !== 'pendencias' && (        <details className="estoque-ferramentas">
+          <summary>Ações da seção</summary>
+          <div className="estoque-acoes">
             <input
               ref={importacaoInputRef}
               type="file"
@@ -2956,7 +2995,7 @@ export default function PainelEstoque() {
               onChange={selecionarNotaFiscal}
               className="hidden"
             />
-            <button
+            {integracaoAtiva && (<button
               type="button"
               onClick={() => importacaoInputRef.current?.click()}
               disabled={importacaoProcessando}
@@ -2965,8 +3004,8 @@ export default function PainelEstoque() {
             >
               <Upload size={18} />
               {importacaoProcessando ? "Lendo..." : "Importar .xlsx"}
-            </button>
-            <button
+            </button>)}
+            {integracaoAtiva && (<button
               type="button"
               onClick={() => sincronizacaoSaldosInputRef.current?.click()}
               disabled={importacaoProcessando}
@@ -2975,8 +3014,8 @@ export default function PainelEstoque() {
             >
               <ArrowRightLeft size={18} />
               {importacaoProcessando ? "Lendo..." : "Sincronizar saldos"}
-            </button>
-            <button
+            </button>)}
+            {integracaoAtiva && (<button
               type="button"
               onClick={() => notaFiscalInputRef.current?.click()}
               disabled={notaFiscalProcessando}
@@ -2985,8 +3024,8 @@ export default function PainelEstoque() {
             >
               <Receipt size={18} />
               {notaFiscalProcessando ? "Analisando..." : "Importar NF"}
-            </button>
-            <button
+            </button>)}
+            {integracaoAtiva && (<button
               type="button"
               onClick={() => setShowHistoricoImportacoesModal(true)}
               className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700 transition-colors hover:bg-slate-50"
@@ -2994,8 +3033,8 @@ export default function PainelEstoque() {
             >
               <FileClock size={18} />
               Histórico
-            </button>
-            <button
+            </button>)}
+            {retiradasAtivas && (<button
               type="button"
               onClick={() => setShowSimulacaoModal(true)}
               className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 font-semibold text-amber-900 transition-colors hover:bg-amber-100"
@@ -3003,61 +3042,62 @@ export default function PainelEstoque() {
             >
               <Calculator size={18} />
               Simular retirada
-            </button>
+            </button>)}
             {/*   BOTAO NOVO: Cadastrar no Catálogo */}
-            <button
-              onClick={abrirModalNovoMaterial}
-              className="flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-            >
-              <FolderPlus size={20} /> + Novo Material
-            </button>
-            <button
+
+            {materiaisAtivos && (<button
               onClick={() => setShowUnidadeRastreavelModal(true)}
               disabled={materiaisRastreaveis.length === 0}
               className="flex items-center gap-2 bg-cyan-700 hover:bg-cyan-800 disabled:bg-slate-300 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
               title="Cadastrar bobina ou rolo individual"
             >
               <Plus size={20} /> Bobina / Rolo
-            </button>
-            <button
+            </button>)}
+            {materiaisAtivos && (<button
               onClick={() => setShowLocalEstoqueModal(true)}
               className="flex items-center gap-2 bg-slate-600 hover:bg-slate-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
             >
               <Plus size={20} /> Depósito
-            </button>
-            <button
+            </button>)}
+            {materiaisAtivos && (<button
               onClick={() => setShowEntradaModal(true)}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
             >
               <Plus size={20} /> Entrada de Material
-            </button>
-            <button
-              onClick={abrirPrimeiraOrPendente}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-            >
-              <Minus size={20} /> Executar OR
-            </button>
+            </button>)}
+
           </div>
-        </div>
+        </details>
+)}
         {error && <Alert type="error" message={error} />}
         {successMessage && <Alert type="success" message={successMessage} />}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
-        {indicadoresEstoque.map((indicador) => (
-          <div key={indicador.label} className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-            <span className="block text-xs font-semibold text-slate-500">{indicador.label}</span>
-            <strong className="mt-1 block text-xl text-slate-800">{indicador.valor}</strong>
+      {materiaisAtivos && (<>
+      <section className="estoque-indicadores" aria-label="Resumo do estoque">
+        {indicadoresEstoque.filter((_, indice) => [0, 1, 3].includes(indice)).map((indicador) => (
+          <div key={indicador.label} className="estoque-indicador">
+            <span>{indicador.label}</span><strong>{indicador.valor}</strong>
+            <small>{indicador.label === "Materiais cadastrados" ? "Catálogo ativo" : indicador.label === "Valor total em estoque" ? "Conforme saldos e custos cadastrados" : "Conferir disponibilidade e reposição"}</small>
           </div>
         ))}
-      </div>
+      </section>
+      <details className="estoque-indicadores-extra">
+        <summary>Outros indicadores <span>Metragem, faltas e rastreáveis</span></summary>
+        <div>{indicadoresEstoque.filter((_, indice) => ![0, 1, 3, 7].includes(indice)).map((indicador) => (
+          <div key={indicador.label}><span>{indicador.label}</span><strong>{indicador.valor}</strong></div>
+        ))}</div>
+      </details>
+      </>)}
+      {retiradasAtivas && (<>
+      <div className="estoque-fila"><FilaPendenciasOperacionais area="ESTOQUE" titulo="Retiradas, devoluções e faltas pendentes" limite={8} recolhivel inicialmenteAberta={false} /></div>
 
-      <FilaPendenciasOperacionais area="ESTOQUE" titulo="Retiradas, devoluções e faltas pendentes" limite={8} />
-
+      </>)}
+      {(retiradasAtivas || (materiaisAtivos && podeGerenciarEstoque)) && (<>
       <div
         role="tablist"
         aria-label="Estoque geral e por obra"
-        className="flex gap-1 overflow-x-auto border-b border-slate-200"
+        className="estoque-tabs flex gap-1 overflow-x-auto border-b border-slate-200"
       >
         <button
           type="button"
@@ -3075,7 +3115,7 @@ export default function PainelEstoque() {
         >
           Estoque geral
         </button>
-        {estoquePorComarca.map((item) => (
+        {(retiradasAtivas ? estoquePorComarca : []).map((item) => (
           <button
             key={item.comarca.id}
             type="button"
@@ -3102,7 +3142,7 @@ export default function PainelEstoque() {
             )}
           </button>
         ))}
-        {podeGerenciarEstoque && (
+        {materiaisAtivos && podeGerenciarEstoque && (
           <button
             type="button"
             role="tab"
@@ -3122,27 +3162,24 @@ export default function PainelEstoque() {
         )}
       </div>
 
+      </>)}
+      {(materiaisAtivos || (retiradasAtivas && abaEstoque !== "geral")) && (<>
       {/* Tabela de Saldo Atual */}
       {abaEstoque === "geral" ? (
       <>
-      <section className="border-y border-slate-200 bg-white px-4 py-4 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-bold text-slate-800">Localizar materiais</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {materiaisFiltrados.length} de {materiais.length} itens visíveis
-            </p>
-          </div>
-          {filtrosEstoqueAtivos && (
-            <button
-              type="button"
-              onClick={limparFiltrosEstoque}
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
-            >
-              Limpar filtros
-            </button>
-          )}
+      <section className="estoque-catalogo" aria-label="Catálogo de materiais">
+        <div className="estoque-catalogo-heading">
+          <div><h2>Catálogo de materiais</h2><p>{materiaisFiltrados.length} de {materiais.length} materiais · {catalogoPagina.itens.length} nesta página</p></div>
+      <section className="catalogo-visual" aria-label="Visualização do catálogo">
+        <div role="group" aria-label="Modo de visualização">
+          <button type="button" aria-pressed={catalogoVisual.modo === "confortavel"} onClick={() => setCatalogoVisual((atual) => ({ ...atual, modo: "confortavel" }))}>Confortável</button>
+          <button type="button" aria-pressed={catalogoVisual.modo === "compacto"} onClick={() => setCatalogoVisual((atual) => ({ ...atual, modo: "compacto" }))}>Planilha compacta</button>
         </div>
+        <label><input type="checkbox" checked={catalogoVisual.fotos} onChange={(event) => setCatalogoVisual((atual) => ({ ...atual, fotos: event.target.checked }))} />Mostrar fotos</label>
+
+      </section>
+        </div>
+        <div className="estoque-filtros">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <label className="sm:col-span-2 xl:col-span-2">
             <span className="mb-1 block text-xs font-semibold text-slate-600">Nome ou identificação</span>
@@ -3202,7 +3239,9 @@ export default function PainelEstoque() {
             </select>
           </label>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <details className="estoque-filtros-avancados">
+          <summary>Filtros avançados {filtrosEstoqueAtivos && <span className="estoque-filtro-ativo">Há filtros aplicados</span>}</summary>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <label>
             <span className="mb-1 block text-xs font-semibold text-slate-600">Disponível mínimo</span>
             <input
@@ -3264,26 +3303,31 @@ export default function PainelEstoque() {
             />
           </label>
         </div>
-      </section>
-      <div className="space-y-5 md:hidden">
+          </details>
+          {filtrosEstoqueAtivos && <button type="button" className="estoque-limpar" onClick={limparFiltrosEstoque}>Limpar filtros</button>}
+        </div>
+        <p className="estoque-legenda">Saldos globais de todos os depósitos; a localização é identificada em cada material. Disponível para novas retiradas = saldo em estoque − reservado. Quantidades mantêm a unidade de cada material. Busca e filtros reiniciam ao trocar de seção.</p>
+
+      {catalogoVisual.modo === "confortavel" && (
+      <div className="catalogo-cards space-y-5" data-testid="catalogo-cards">
         {materiaisPorCategoria.map((grupo) => grupo.materiais.length > 0 && (
           <section key={grupo.value} aria-labelledby={`categoria-${grupo.value}`}>
             <h2
               id={`categoria-${grupo.value}`}
               className="mb-2 text-xs font-black uppercase text-slate-500"
             >
-              {grupo.label} ({grupo.materiais.length})
+              {grupo.label} ({grupo.materiais.length} nesta página)
             </h2>
-            <div className="space-y-3">
+            <div className="estoque-material-lista">
               {grupo.materiais.map((material) => (
                 <article
                   key={material.id}
-                  className={`rounded-lg border bg-white p-4 shadow-sm ${
-                    isCriticalStock(material) ? "border-red-200 bg-red-50/40" : "border-slate-200"
+                  className={`estoque-material rounded-lg border bg-white p-4 shadow-sm ${
+                    isCriticalStock(material) ? "estoque-material-critico border-red-200 bg-red-50/40" : "border-slate-200"
                   }`}
                 >
-                  <div className="flex items-start gap-3">
-                    {material.fotoProdutoUrl ? (
+                  <div className="estoque-material-identidade flex items-start gap-3">
+                    {catalogoVisual.fotos && (material.fotoProdutoUrl ? (
                       <button
                         type="button"
                         onClick={() => setFotoExpandida(material)}
@@ -3292,6 +3336,7 @@ export default function PainelEstoque() {
                       >
                         <img
                           src={material.fotoProdutoUrl}
+                          loading="lazy" decoding="async" width={56} height={56}
                           alt={`Foto de ${material.nome}`}
                           className="h-full w-full object-cover"
                         />
@@ -3300,19 +3345,22 @@ export default function PainelEstoque() {
                       <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-400">
                         <Package size={20} />
                       </span>
-                    )}
+                    ))}
                     <div className="min-w-0 flex-1">
                       <h3 className="break-words text-sm font-bold text-slate-900">{material.nome}</h3>
-                      <p className="mt-1 break-all font-mono text-xs text-slate-500">
-                        {material.partNumber || "Sem part number"}
-                      </p>
                       {material.descricao && (
                         <p className="mt-1 break-words text-xs text-slate-500">{material.descricao}</p>
                       )}
                     </div>
                   </div>
 
-                  <dl className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                  <dl className="catalogo-resumo-rapido mt-3 grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3">
+                    <div><dt className="text-xs text-slate-500">Disponível</dt><dd className="mt-1 text-base font-bold text-slate-900">{formatarNumero(getLivre(material))} {unidadeMaterial(material)}</dd></div>
+                    <div className="text-right"><dt className="text-xs text-slate-500">Valor em estoque</dt><dd className="mt-1 text-base font-bold text-slate-900">{formatarMoeda(valorTotalMaterial(material))}</dd></div>
+                  </dl>
+                  <details className="estoque-material-detalhes"><summary>Cadastro e saldos</summary>
+                  <p className="mt-3 break-all font-mono text-xs text-slate-500">{material.partNumber || "Sem part number"}</p>
+                  <dl className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-3">
                     <div className="rounded-md bg-slate-100 p-2">
                       <dt className="text-[10px] font-bold uppercase text-slate-500">Em estoque</dt>
                       <dd className="mt-1 text-xs font-bold text-slate-800">
@@ -3323,12 +3371,6 @@ export default function PainelEstoque() {
                       <dt className="text-[10px] font-bold uppercase text-amber-700">Reservado</dt>
                       <dd className="mt-1 text-xs font-bold text-amber-800">
                         {formatarNumero(getReservado(material))} {unidadeMaterial(material)}
-                      </dd>
-                    </div>
-                    <div className={`rounded-md p-2 ${isCriticalStock(material) ? "bg-red-100" : "bg-green-50"}`}>
-                      <dt className={`text-[10px] font-bold uppercase ${isCriticalStock(material) ? "text-red-700" : "text-green-700"}`}>Disponível</dt>
-                      <dd className={`mt-1 text-xs font-bold ${isCriticalStock(material) ? "text-red-800" : "text-green-800"}`}>
-                        {formatarNumero(getLivre(material))} {unidadeMaterial(material)}
                       </dd>
                     </div>
                     <div className={`rounded-md p-2 ${getFaltaRegistrada(material) > 0 ? "bg-rose-100" : "bg-slate-50"}`}>
@@ -3346,13 +3388,12 @@ export default function PainelEstoque() {
                       <span className="block text-slate-400">Custo médio</span>
                       <strong className="text-slate-800">{formatarMoeda(getCustoUnitarioExibido(material))}</strong>
                     </div>
-                    <div className="text-right">
-                      <span className="block text-slate-400">Valor em estoque</span>
-                      <strong className="text-slate-900">{formatarMoeda(valorTotalMaterial(material))}</strong>
-                    </div>
+
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                  <p className="estoque-material-fabricante">{getCategoriaMaterialLabel(material.categoria)} · {material.fabricante || "Fabricante não informado"}</p>
+                  </details>
+                  <div className="estoque-material-rodape mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
                     <p className="min-w-0 break-words text-xs text-slate-500">
                       {saldosDoMaterial(material.id).map((saldo) => saldo.localEstoque?.nome).filter(Boolean).join(", ") || "Local não informado"}
                     </p>
@@ -3379,93 +3420,53 @@ export default function PainelEstoque() {
         )}
       </div>
 
-      {abasRetiradaImportadas > 0 && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          <strong>{abasRetiradaImportadas} abas de retirada</strong> foram importadas em {" "}
-          <strong>{ordensHistoricasImportadas} ORs</strong>. As abas CADASTRO_PRODUTOS,
-          ESTOQUE ATUAL, SOBRAS - RETORNOS, SIMULACAO e Configurações são auxiliares e não
-          geram uma OR própria.
-        </div>
       )}
-
-      {atalhosOrdensEstoque.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-bold text-slate-800">Ordens de retirada disponíveis</h2>
-            <span className="text-xs font-semibold text-slate-500">
-              {atalhosOrdensEstoque.length} ORs
-            </span>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {atalhosOrdensEstoque.map((ordem) => (
-              <button
-                key={`atalho-${ordem.id}`}
-                type="button"
-                onClick={() => {
-                  setAbaEstoque(String(ordem.comarcaId));
-                  setAbaOrdemEstoque(String(ordem.id));
-                }}
-                className={`shrink-0 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
-                  String(abaEstoque) === String(ordem.comarcaId)
-                    && String(abaOrdemEstoque) === String(ordem.id)
-                    ? "border-blue-600 bg-blue-50 text-blue-700"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50"
-                }`}
-              >
-                <strong className="block">{ordem.numeroOr}</strong>
-                <span className="mt-0.5 block text-[10px] text-slate-400">
-                  {ordem.comarcaNome}
-                  {ordem.abasOrigem?.[0] ? ` · ${ordem.abasOrigem[0]}` : ""}
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-      <div className="hidden overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-md md:block">
+      {catalogoVisual.modo === "compacto" && (
+      <div className="catalogo-tabela" data-testid="catalogo-tabela" tabIndex={0} role="region" aria-label="Catálogo compacto; role para consultar todas as colunas">
         <table className="w-full min-w-[1400px]">
+          <colgroup><col className="catalogo-col-produto" /><col className="catalogo-col-quantidade" /><col className="catalogo-col-valor" /><col className="catalogo-col-saldo" /><col className="catalogo-col-saldo" /><col className="catalogo-col-custo" /><col className="catalogo-col-saldo" /><col className="catalogo-col-local" /><col className="catalogo-col-medicao" /><col className="catalogo-col-categoria" /><col className="catalogo-col-codigo" /><col className="catalogo-col-fabricante" /><col className="catalogo-col-acoes" /></colgroup>
           <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 shadow-sm">
             <tr>
-              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+<th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
                 Produto
               </th>
-              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                Categoria
-              </th>
-              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                Part Number
-              </th>
-              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                Fabricante
-              </th>
-              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                Localização
-              </th>
-              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                Medição
-              </th>
-              <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
-                Em estoque
-              </th>
-              <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
-                Reservado
-              </th>
-              <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
+<th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
                 Disponível
               </th>
-              <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
-                Em falta nas ORs
-              </th>
-              <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">
-                Custo médio
-              </th>
-              <th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">
+<th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">
                 Valor em estoque
               </th>
-              <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
+<th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
+                Em estoque
+              </th>
+<th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
+                Reservado
+              </th>
+<th className="px-6 py-4 text-right text-sm font-semibold text-slate-700">
+                Custo médio
+              </th>
+<th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
+                Em falta nas ORs
+              </th>
+<th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                Localização
+              </th>
+<th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                Medição
+              </th>
+<th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                Categoria
+              </th>
+<th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                Part Number
+              </th>
+<th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                Fabricante
+              </th>
+<th className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
                 Ações
               </th>
-            </tr>
+</tr>
           </thead>
           <tbody>
             {materiaisPorCategoria.map((grupo) => (
@@ -3475,17 +3476,17 @@ export default function PainelEstoque() {
                     colSpan="13"
                     className="px-6 py-2 text-xs font-black uppercase tracking-wide text-slate-600"
                   >
-                    {grupo.label} ({grupo.materiais.length})
+                    {grupo.label} ({grupo.materiais.length} nesta página)
                   </td>
                 </tr>
                 {grupo.materiais.map((material) => (
                   <tr
                     key={material.id}
-                    className={`border-b border-slate-200 hover:bg-slate-50 transition-colors ${isCriticalStock(material) ? "bg-red-50/50" : ""}`}
+                    className={`border-b border-slate-200 hover:bg-slate-50 transition-colors ${isCriticalStock(material) ? "estoque-linha-critica bg-red-50/50" : ""}`}
                   >
                     <td className="px-6 py-4 text-sm text-slate-800">
                       <div className="flex items-center gap-3">
-                        {material.fotoProdutoUrl ? (
+                        {catalogoVisual.fotos && (material.fotoProdutoUrl ? (
                           <button
                             type="button"
                             onClick={() => setFotoExpandida(material)}
@@ -3494,6 +3495,7 @@ export default function PainelEstoque() {
                           >
                             <img
                               src={material.fotoProdutoUrl}
+                              loading="lazy" decoding="async" width={56} height={56}
                               alt={`Foto de ${material.nome}`}
                               className="h-full w-full object-cover"
                             />
@@ -3502,7 +3504,7 @@ export default function PainelEstoque() {
                           <span className="flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-400">
                             <Package size={18} />
                           </span>
-                        )}
+                        ))}
                         <span>
                           <strong className="block text-slate-800">
                             {material.nome}
@@ -3515,16 +3517,51 @@ export default function PainelEstoque() {
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-xs font-bold uppercase text-slate-500">
-                      {getCategoriaMaterialLabel(material.categoria)}
+<td className="px-6 py-4 text-center">
+                      <span
+                        className={`inline-flex min-w-[3rem] items-center justify-center rounded-full px-3 py-1 text-sm font-semibold ${isCriticalStock(material) ? "bg-red-200 text-red-800" : "bg-green-100 text-green-800"}`}
+                      >
+                        {isCriticalStock(material) && (
+                          <AlertCircle size={14} className="mr-1" />
+                        )}
+                        {formatarNumero(getLivre(material))} {unidadeMaterial(material)}
+                      </span>
                     </td>
-                    <td className="px-6 py-4 text-sm font-mono text-slate-800">
-                      {material.partNumber}
+<td className="px-6 py-4 text-right text-sm font-bold text-slate-900">
+                      {formatarMoeda(valorTotalMaterial(material))}
                     </td>
-                    <td className="px-6 py-4 text-sm text-slate-800">
-                      {material.fabricante}
+<td className="px-6 py-4 text-center">
+                      <span className="inline-flex min-w-[3rem] items-center justify-center rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-800">
+                        {formatarNumero(getSaldoEmEstoque(material))} {unidadeMaterial(material)}
+                      </span>
+                      {!controlaMetragem(material) && Number(material.metragemDisponivel) > 0 && (
+                        <span className="mt-1 block text-[11px] text-slate-500">
+                          {formatarNumero(material.metragemDisponivel)} m no total
+                        </span>
+                      )}
                     </td>
-                    <td className="px-6 py-4 text-sm text-slate-600">
+<td className="px-6 py-4 text-center">
+                      <span className="inline-flex min-w-[3rem] items-center justify-center rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">
+                        {formatarNumero(getReservado(material))} {unidadeMaterial(material)}
+                      </span>
+                    </td>
+<td className="px-6 py-4 text-right">
+                      <strong className="block text-sm text-slate-800">
+                        {formatarMoeda(getCustoUnitarioExibido(material))}
+                      </strong>
+                      <span className="text-[11px] text-slate-500">
+                        por {controlaMetragem(material) ? "metro" : unidadeMaterial(material)}
+                      </span>
+                    </td>
+<td className="px-6 py-4 text-center">
+                      <span className={`inline-flex min-w-[3rem] items-center justify-center rounded-full px-3 py-1 text-sm font-semibold ${getFaltaRegistrada(material) > 0 ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-500"}`}>
+                        {getFaltaRegistrada(material) > 0 && (
+                          <AlertCircle size={14} className="mr-1" />
+                        )}
+                        {formatarNumero(getFaltaRegistrada(material))} {unidadeMaterial(material)}
+                      </span>
+                    </td>
+<td className="px-6 py-4 text-sm text-slate-600">
                       <div className="flex max-w-[220px] flex-wrap gap-1">
                         {saldosDoMaterial(material.id).map((saldo) => (
                           <span key={saldo.id} className="rounded bg-slate-100 px-2 py-1 text-[11px]">
@@ -3534,7 +3571,7 @@ export default function PainelEstoque() {
                         {saldosDoMaterial(material.id).length === 0 && "Não informado"}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-xs text-slate-600">
+<td className="px-6 py-4 text-xs text-slate-600">
                       <strong className="block text-slate-700">
                         {TIPOS_CONTROLE.find(
                           (item) => item.value === (material.tipoControle || "UNIDADE"),
@@ -3547,51 +3584,16 @@ export default function PainelEstoque() {
                           : ""}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className="inline-flex min-w-[3rem] items-center justify-center rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-800">
-                        {formatarNumero(getSaldoEmEstoque(material))} {unidadeMaterial(material)}
-                      </span>
-                      {!controlaMetragem(material) && Number(material.metragemDisponivel) > 0 && (
-                        <span className="mt-1 block text-[11px] text-slate-500">
-                          {formatarNumero(material.metragemDisponivel)} m no total
-                        </span>
-                      )}
+<td className="px-6 py-4 text-xs font-bold uppercase text-slate-500">
+                      {getCategoriaMaterialLabel(material.categoria)}
                     </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className="inline-flex min-w-[3rem] items-center justify-center rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">
-                        {formatarNumero(getReservado(material))} {unidadeMaterial(material)}
-                      </span>
+<td className="px-6 py-4 text-sm font-mono text-slate-800">
+                      {material.partNumber}
                     </td>
-                    <td className="px-6 py-4 text-center">
-                      <span
-                        className={`inline-flex min-w-[3rem] items-center justify-center rounded-full px-3 py-1 text-sm font-semibold ${isCriticalStock(material) ? "bg-red-200 text-red-800" : "bg-green-100 text-green-800"}`}
-                      >
-                        {isCriticalStock(material) && (
-                          <AlertCircle size={14} className="mr-1" />
-                        )}
-                        {formatarNumero(getLivre(material))} {unidadeMaterial(material)}
-                      </span>
+<td className="px-6 py-4 text-sm text-slate-800">
+                      {material.fabricante}
                     </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex min-w-[3rem] items-center justify-center rounded-full px-3 py-1 text-sm font-semibold ${getFaltaRegistrada(material) > 0 ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-500"}`}>
-                        {getFaltaRegistrada(material) > 0 && (
-                          <AlertCircle size={14} className="mr-1" />
-                        )}
-                        {formatarNumero(getFaltaRegistrada(material))} {unidadeMaterial(material)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <strong className="block text-sm text-slate-800">
-                        {formatarMoeda(getCustoUnitarioExibido(material))}
-                      </strong>
-                      <span className="text-[11px] text-slate-500">
-                        por {controlaMetragem(material) ? "metro" : unidadeMaterial(material)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right text-sm font-bold text-slate-900">
-                      {formatarMoeda(valorTotalMaterial(material))}
-                    </td>
-                    <td className="px-6 py-4 text-center">
+<td className="px-6 py-4 text-center">
                       <div className="flex justify-center gap-1">
                         <button
                           type="button"
@@ -3631,7 +3633,7 @@ export default function PainelEstoque() {
                         )}
                       </div>
                     </td>
-                  </tr>
+</tr>
                 ))}
               </Fragment>
             ))}
@@ -3647,6 +3649,16 @@ export default function PainelEstoque() {
           </tbody>
         </table>
       </div>
+      )}
+      <div className="catalogo-paginacao" aria-label="Paginação do catálogo">
+        <span role="status">{catalogoPagina.inicio}–{catalogoPagina.fim} de {materiaisFiltrados.length} materiais</span>
+        <div>
+          <button type="button" disabled={catalogoPagina.pagina === 0} onClick={() => mudarPaginaCatalogo(catalogoPagina.pagina - 1)}>Anterior</button>
+          <span>Página {catalogoPagina.pagina + 1} de {catalogoPagina.totalPaginas}</span>
+          <button type="button" disabled={catalogoPagina.pagina + 1 >= catalogoPagina.totalPaginas} onClick={() => mudarPaginaCatalogo(catalogoPagina.pagina + 1)}>Próxima</button>
+        </div>
+      </div>
+      </section>
       </>
       ) : abaEstoque === "removidos" ? (
         <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -3839,6 +3851,8 @@ export default function PainelEstoque() {
         </section>
       )}
 
+      </>)}
+      {materiaisAtivos && (<>
       {unidadesRastreaveis.length > 0 && (
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-md">
           <div className="border-b border-slate-200 bg-slate-50/50 p-5">
@@ -3895,6 +3909,51 @@ export default function PainelEstoque() {
         </div>
       )}
 
+      </>)}
+      {retiradasAtivas && (<>
+      {abasRetiradaImportadas > 0 && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <strong>{abasRetiradaImportadas} abas de retirada</strong> foram importadas em {" "}
+          <strong>{ordensHistoricasImportadas} ORs</strong>. As abas CADASTRO_PRODUTOS,
+          ESTOQUE ATUAL, SOBRAS - RETORNOS, SIMULACAO e Configurações são auxiliares e não
+          geram uma OR própria.
+        </div>
+      )}
+
+      {atalhosOrdensEstoque.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-bold text-slate-800">Ordens de retirada disponíveis</h2>
+            <span className="text-xs font-semibold text-slate-500">
+              {atalhosOrdensEstoque.length} ORs
+            </span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {atalhosOrdensEstoque.map((ordem) => (
+              <button
+                key={`atalho-${ordem.id}`}
+                type="button"
+                onClick={() => {
+                  setAbaEstoque(String(ordem.comarcaId));
+                  setAbaOrdemEstoque(String(ordem.id));
+                }}
+                className={`shrink-0 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                  String(abaEstoque) === String(ordem.comarcaId)
+                    && String(abaOrdemEstoque) === String(ordem.id)
+                    ? "border-blue-600 bg-blue-50 text-blue-700"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50"
+                }`}
+              >
+                <strong className="block">{ordem.numeroOr}</strong>
+                <span className="mt-0.5 block text-[10px] text-slate-400">
+                  {ordem.comarcaNome}
+                  {ordem.abasOrigem?.[0] ? ` · ${ordem.abasOrigem[0]}` : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="bg-white rounded-lg shadow-md overflow-hidden border border-slate-200 mb-8">
         <div className="p-5 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between gap-3">
           <div>
@@ -4016,6 +4075,8 @@ export default function PainelEstoque() {
         </div>
       </div>
 
+      </>)}
+      {historicoAtivo && (<>
       <section className="mb-8 border-y border-slate-200 bg-white">
         <div className="grid gap-0 xl:grid-cols-[0.8fr_1.35fr_1fr]">
           <div className="border-b border-slate-200 p-5 xl:border-b-0 xl:border-r">
@@ -4110,16 +4171,17 @@ export default function PainelEstoque() {
         </div>
       </section>
 
+      <p className="estoque-legenda">Saídas no mês: {indicadoresEstoque[7].valor}</p>
       {/* Histórico */}
       <div className="bg-white rounded-lg shadow-md overflow-hidden border border-slate-200">
-        <div className="p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <History size={18} className="text-slate-500" />
             <h2 className="font-bold text-slate-800">
               Histórico de Movimentações
             </h2>
           </div>
-          <div className="grid w-full gap-2 md:grid-cols-4 xl:grid-cols-[210px_140px_170px_130px_150px_150px_135px_135px_44px]">
+          <div className="grid w-full min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="relative">
               <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
               <input
@@ -4131,6 +4193,7 @@ export default function PainelEstoque() {
               />
             </div>
             <select
+              aria-label="Tipo de movimentação"
               value={historicoTipoFiltro}
               onChange={(e) => setHistoricoTipoFiltro(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -4143,6 +4206,7 @@ export default function PainelEstoque() {
               ))}
             </select>
             <select
+              aria-label="OS ou comarca"
               value={historicoComarcaFiltro}
               onChange={(e) => setHistoricoComarcaFiltro(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -4155,6 +4219,7 @@ export default function PainelEstoque() {
               ))}
             </select>
             <select
+              aria-label="Projeto"
               value={historicoProjetoFiltro}
               onChange={(e) => setHistoricoProjetoFiltro(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -4167,6 +4232,7 @@ export default function PainelEstoque() {
               ))}
             </select>
             <select
+              aria-label="Material"
               value={historicoMaterialFiltro}
               onChange={(e) => setHistoricoMaterialFiltro(e.target.value)}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -4177,6 +4243,7 @@ export default function PainelEstoque() {
               ))}
             </select>
             <select
+              aria-label="Pessoa"
               value={historicoPessoaFiltro}
               onChange={(e) => setHistoricoPessoaFiltro(e.target.value)}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -4317,6 +4384,10 @@ export default function PainelEstoque() {
         </table>
       </div>
 
+      </>)}
+      {secao === 'pendencias' && <section className="estoque-catalogo"><p className="estoque-eyebrow">INDISPONÍVEL NO FLUXO ATUAL</p><h2>Conferência documental posterior à retirada</h2><p>O backend atual exige assinaturas para executar a OR. Não existe uma fila independente de comprovantes posteriores. Esta seção não apresenta contagens ou aprovações simuladas.</p><p>Documentos já emitidos e execução/devolução continuam disponíveis em Retiradas. A separação entre entrega física e documentação exige implementação futura de regras e persistência.</p></section>}
+      {integracaoAtiva && <section className="estoque-catalogo"><h2>Planilhas e integração</h2><p>Use Ações da seção para os leitores, prévias e histórico de importações já existentes. Nenhuma integração automática com a V2 está disponível.</p><p>Importações e sincronização manual preservam as validações atuais. Não há status de sincronização automática nem sucesso simulado.</p><button className="estoque-secondary" onClick={() => setShowHistoricoImportacoesModal(true)}>Consultar importações e reconciliações</button></section>}
+      {showSimulacaoModal && (
       <Modal isOpen={showSimulacaoModal} onClose={handleCloseModal} title="Simular retirada">
         <div className="space-y-5">
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -4473,7 +4544,9 @@ export default function PainelEstoque() {
           </div>
         </div>
       </Modal>
+      )}
 
+      {showMinimoLocalModal && (
       <Modal isOpen={showMinimoLocalModal} onClose={handleCloseModal} title="Estoque Mínimo por Depósito">
         <form onSubmit={salvarMinimoLocal} className="space-y-4">
           <div>
@@ -4513,7 +4586,9 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
 
+      {showLocalEstoqueModal && (
       <Modal isOpen={showLocalEstoqueModal} onClose={handleCloseModal} title="Cadastrar Depósito">
         <form onSubmit={cadastrarLocalEstoque} className="space-y-4">
           <div>
@@ -4541,7 +4616,9 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
 
+      {showTransferenciaUnidadeModal && (
       <Modal
         isOpen={showTransferenciaUnidadeModal}
         onClose={handleCloseModal}
@@ -4595,7 +4672,9 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
 
+      {showAjusteModal && (
       <Modal isOpen={showAjusteModal} onClose={handleCloseModal} title="Ajustar Saldo">
         <form onSubmit={registrarAjuste} className="space-y-4">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
@@ -4677,7 +4756,9 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
 
+      {showTransferenciaModal && (
       <Modal isOpen={showTransferenciaModal} onClose={handleCloseModal} title="Transferir Localização">
         <form onSubmit={registrarTransferencia} className="space-y-4">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
@@ -4752,7 +4833,9 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
 
+      {showHistoricoImportacoesModal && (
       <Modal
         isOpen={showHistoricoImportacoesModal}
         onClose={handleCloseModal}
@@ -5294,7 +5377,9 @@ export default function PainelEstoque() {
           )}
         </div>
       </Modal>
+      )}
 
+      {Boolean(retiradaHistoricaEdicao) && (
       <Modal
         isOpen={Boolean(retiradaHistoricaEdicao)}
         onClose={() => {
@@ -5419,7 +5504,9 @@ export default function PainelEstoque() {
           </form>
         )}
       </Modal>
+      )}
 
+      {Boolean(importacaoPreview) && (
       <Modal
         isOpen={Boolean(importacaoPreview)}
         onClose={() => {
@@ -6028,7 +6115,9 @@ export default function PainelEstoque() {
           </div>
         )}
       </Modal>
+      )}
 
+      {Boolean(notaFiscalPreview) && (
       <Modal
         isOpen={Boolean(notaFiscalPreview)}
         onClose={() => {
@@ -6096,7 +6185,9 @@ export default function PainelEstoque() {
           </div>
         )}
       </Modal>
+      )}
 
+      {Boolean(fotoExpandida) && (
       <Modal
         isOpen={Boolean(fotoExpandida)}
         onClose={() => setFotoExpandida(null)}
@@ -6117,8 +6208,10 @@ export default function PainelEstoque() {
           )}
         </div>
       </Modal>
+      )}
 
       {/*   MODAL NOVO: Cadastro de Material do Catálogo */}
+      {showNovoMaterialModal && (
       <Modal
         isOpen={showNovoMaterialModal}
         onClose={handleCloseModal}
@@ -6416,8 +6509,10 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
 
       {/* Modal Entrada */}
+      {showEntradaModal && (
       <Modal
         isOpen={showEntradaModal}
         onClose={handleCloseModal}
@@ -6535,7 +6630,9 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
 
+      {showUnidadeRastreavelModal && (
       <Modal
         isOpen={showUnidadeRastreavelModal}
         onClose={handleCloseModal}
@@ -6626,8 +6723,10 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
 
       {/* Modal OR */}
+      {showSaidaModal && (
       <Modal
         isOpen={showSaidaModal}
         onClose={handleCloseModal}
@@ -6960,6 +7059,7 @@ export default function PainelEstoque() {
           </div>
         </form>
       </Modal>
+      )}
     </div>
   );
 }
