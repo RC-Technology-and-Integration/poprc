@@ -256,3 +256,17 @@ test('custo fracionado usa unidade do material sem mudar o valor',async({page})=
  await page.keyboard.press('Escape');
  await expect(page.locator('.catalogo-resumo-rapido').first()).toContainText('R$ 1,00');
 });
+
+
+test('tabela compacta apresenta custo por unidade fracionada, sem confundir eixo decimal com metro',async({page})=>{
+ await page.getByRole('button',{name:'Planilha compacta',exact:true}).click();
+ const table=page.locator('[data-testid=catalogo-tabela]');
+ const columns=(await table.locator('thead th').allTextContents()).map(t=>t.trim());
+ const costIndex=columns.indexOf('Custo médio');expect(costIndex).toBeGreaterThan(-1);
+ const row=table.locator('tbody tr').filter({hasText:'TESTE Material 0001'});
+ await expect(row.locator('td').nth(costIndex)).toContainText('por un');
+ await expect(row.locator('td').nth(costIndex)).not.toContainText('por metro');
+ await expect(row.locator('td').nth(costIndex)).toContainText('8,00');
+ await expect(row.locator('td').nth(1)).toHaveText('0,125 un');
+ await expect(row.locator('td').nth(2)).toContainText('1,00');
+});

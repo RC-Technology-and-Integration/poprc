@@ -3387,6 +3387,7 @@ export default function PainelEstoque({ secao = 'materiais' }) {
                     <div>
                       <span className="block text-slate-400">Custo médio</span>
                       <strong className="text-slate-800">{formatarMoeda(getCustoUnitarioExibido(material))}</strong>
+                      <span className="block text-slate-500">por {unidadeMaterial(material)}</span>
                     </div>
 
                   </div>
@@ -3550,7 +3551,7 @@ export default function PainelEstoque({ secao = 'materiais' }) {
                         {formatarMoeda(getCustoUnitarioExibido(material))}
                       </strong>
                       <span className="text-[11px] text-slate-500">
-                        por {controlaMetragem(material) ? "metro" : unidadeMaterial(material)}
+                        por {unidadeMaterial(material)}
                       </span>
                     </td>
 <td className="px-6 py-4 text-center">
