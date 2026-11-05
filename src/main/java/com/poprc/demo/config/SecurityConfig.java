@@ -79,6 +79,8 @@ public class SecurityConfig {
                         authorize.requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll();
                     }
 
+                    // Arquivos do novo regime nunca são servidos por caminho estático, nem no modo dev.
+                    authorize.requestMatchers("/uploads/.retiradas-v2/**").denyAll();
                     if (!securityEnabled) {
                         authorize.anyRequest().permitAll();
                         return;
@@ -123,6 +125,8 @@ public class SecurityConfig {
                     authorize.requestMatchers(HttpMethod.GET, "/api/atividades-padrao/**")
                             .hasAnyRole("ADMIN", "SUPERVISOR_TECNICO", "TECNICO");
                     authorize.requestMatchers("/api/atividades-padrao/**").hasRole("ADMIN");
+                    authorize.requestMatchers(HttpMethod.POST, "/api/ordens-retirada/v2/*/conferencia")
+                            .hasAnyRole("ADMIN", "SUPERVISOR_TECNICO");
                     authorize.requestMatchers(HttpMethod.GET, "/api/ordens-retirada/**")
                             .hasAnyRole("ADMIN", "SUPERVISOR_TECNICO", "TECNICO", "ESTOQUE", "AUDITOR");
                     authorize.requestMatchers(HttpMethod.GET, "/api/estoque/materiais")

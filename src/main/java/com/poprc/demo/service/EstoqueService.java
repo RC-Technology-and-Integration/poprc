@@ -19,6 +19,9 @@ import java.math.RoundingMode;
 @Service
 @RequiredArgsConstructor
 public class EstoqueService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
 
     private final MaterialRepository materialRepository;
     private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
@@ -27,6 +30,7 @@ public class EstoqueService {
 
     @Transactional
     public Material cadastrarMaterial(Material material) {
+        if (reservaV2 != null) reservaV2.lock();
         // This entry point creates materials, including when invoked by importers.
         // Reject before normalizing state or reaching persistence; save must never merge here.
         if (material.getId() != null || material.getVersion() != null) {
@@ -57,6 +61,7 @@ public class EstoqueService {
 
     @Transactional
     public Material atualizarMaterial(Long id, Material dados) {
+        if (reservaV2 != null) reservaV2.lock();
         Material material = materialRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new IllegalArgumentException("Material não encontrado."));
 
@@ -66,6 +71,10 @@ public class EstoqueService {
         TipoControleEstoque novoControle = dados.getTipoControle() != null
                 ? dados.getTipoControle()
                 : TipoControleEstoque.UNIDADE;
+        if (reservaV2 != null) {
+            reservaV2.protegerCadastro(material, controleAtual, novoControle, dados.getUnidadeMedida());
+        }
+
         boolean possuiSaldo = valor(material.getQuantidadeDisponivel()) > 0
                 || valor(material.getQuantidadeReservada()) > 0
                 || valor(material.getMetragemDisponivel()).signum() > 0;
@@ -95,6 +104,7 @@ public class EstoqueService {
 
     @Transactional
     public void removerMaterial(Long id, String removidoPor) {
+        if (reservaV2 != null) reservaV2.lock();
         Material material = materialRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new IllegalArgumentException("Material não encontrado."));
         if (!Boolean.TRUE.equals(material.getAtivo())) {
@@ -115,6 +125,7 @@ public class EstoqueService {
 
     @Transactional
     public Material restaurarMaterial(Long id, String restauradoPor) {
+        if (reservaV2 != null) reservaV2.lock();
         Material material = materialRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new IllegalArgumentException("Material não encontrado."));
         if (Boolean.TRUE.equals(material.getAtivo())) {
@@ -130,6 +141,7 @@ public class EstoqueService {
     @Transactional
     public MovimentacaoEstoque registrarEntrada(Long materialId, Integer quantidade, BigDecimal metragem,
             BigDecimal custoUnitarioEntrada, Long funcionarioId, Long localEstoqueId) {
+        if (reservaV2 != null) reservaV2.lock();
         return registrarEntradaInterna(materialId, quantidade, metragem, custoUnitarioEntrada,
                 funcionarioId, localEstoqueId, "Entrada de estoque");
     }
@@ -137,6 +149,7 @@ public class EstoqueService {
     @Transactional
     public MovimentacaoEstoque registrarEntradaNotaFiscal(Long materialId, Integer quantidade, BigDecimal metragem,
             BigDecimal custoUnitarioEntrada, Long funcionarioId, Long localEstoqueId, String numeroNota) {
+        if (reservaV2 != null) reservaV2.lock();
         String referencia = numeroNota == null || numeroNota.isBlank() ? "não informada" : numeroNota.trim();
         return registrarEntradaInterna(materialId, quantidade, metragem, custoUnitarioEntrada,
                 funcionarioId, localEstoqueId, "Entrada pela nota fiscal " + referencia);
@@ -201,12 +214,14 @@ public class EstoqueService {
 
     @Transactional
     public MovimentacaoEstoque registrarSaida(Long materialId, Integer quantidade, Long funcionarioId, Long comarcaId) {
+        if (reservaV2 != null) reservaV2.lock();
         throw new IllegalArgumentException("Saída de material exige uma Ordem de Retirada executada e assinada.");
     }
 
     @Transactional
     public MovimentacaoEstoque registrarAjuste(Long materialId, Long localEstoqueId, BigDecimal valorAjuste,
             TipoMovimentacao tipo, String motivo, String lancadoPor, String autorizadoPor) {
+        if (reservaV2 != null) reservaV2.lock();
         if (!TipoMovimentacao.AJUSTE_POSITIVO.equals(tipo)
                 && !TipoMovimentacao.AJUSTE_NEGATIVO.equals(tipo)) {
             throw new IllegalArgumentException("Tipo de ajuste inválido.");
@@ -254,6 +269,7 @@ public class EstoqueService {
             BigDecimal custoUnitario,
             String motivo,
             String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         if (saldoDesejado == null || saldoDesejado.signum() < 0) {
             throw new IllegalArgumentException("O saldo importado não pode ser negativo.");
         }
@@ -323,6 +339,7 @@ public class EstoqueService {
             BigDecimal custoUnitario,
             String motivo,
             String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         return reconciliarSaldoPlanilha(
                 materialId,
                 localEstoqueId,
@@ -335,6 +352,7 @@ public class EstoqueService {
     @Transactional
     public MovimentacaoEstoque transferirLocalizacao(Long materialId, Long origemId, Long destinoId,
             BigDecimal valorTransferido, String motivo, String lancadoPor, String autorizadoPor) {
+        if (reservaV2 != null) reservaV2.lock();
         validarPositivo(valorTransferido, "O valor da transferência deve ser maior que zero.");
         validarTexto(motivo, "O motivo da transferência é obrigatório.");
         validarTexto(lancadoPor, "Informe quem lançou a transferência.");

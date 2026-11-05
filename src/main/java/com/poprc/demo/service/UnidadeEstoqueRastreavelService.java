@@ -19,6 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class UnidadeEstoqueRastreavelService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
 
     private final UnidadeEstoqueRastreavelRepository unidadeRepository;
     private final MaterialRepository materialRepository;
@@ -35,6 +38,7 @@ public class UnidadeEstoqueRastreavelService {
     @Transactional
     public UnidadeEstoqueRastreavel cadastrar(Long materialId, String codigo, BigDecimal metragemInicial,
             String observacao, Long localEstoqueId) {
+        if (reservaV2 != null) reservaV2.lock();
         if (codigo == null || codigo.isBlank()) {
             throw new IllegalArgumentException("Código da bobina/rolo é obrigatório.");
         }
@@ -88,6 +92,7 @@ public class UnidadeEstoqueRastreavelService {
     @Transactional
     public UnidadeEstoqueRastreavel transferir(Long unidadeId, Long destinoId, String motivo,
             String lancadoPor, String autorizadoPor) {
+        if (reservaV2 != null) reservaV2.lock();
         validarTexto(motivo, "Motivo da transferência é obrigatório.");
         validarTexto(lancadoPor, "Informe quem lançou a transferência.");
         validarTexto(autorizadoPor, "Informe quem autorizou a transferência.");

@@ -20,20 +20,26 @@ import com.poprc.demo.repository.ProjetoRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class OrdemServicoService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
 
     private final OrdemServicoRepository ordemServicoRepository;
     private final ComarcaRepository comarcaRepository;
@@ -49,6 +55,7 @@ public class OrdemServicoService {
 
     @Transactional
     public OrdemServico criar(CriarOrdemServicoRequest request) {
+        if (reservaV2 != null) reservaV2.lock();
         simulacaoDocumentoService.exigirHabilitada(request.isSimulacao());
         if (request.getProjetoId() == null) {
             throw new IllegalArgumentException("Projeto/Comarca alvo é obrigatório para criar a OS.");
@@ -102,11 +109,13 @@ public class OrdemServicoService {
 
     @Transactional
     public OrdemServico atualizarStatus(Long id, StatusOS novoStatus) {
+        if (reservaV2 != null) reservaV2.lock();
         return atualizarStatus(id, novoStatus, "Operação manual");
     }
 
     @Transactional
     public OrdemServico atualizarStatus(Long id, StatusOS novoStatus, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         if (!ordemServicoRepository.existsById(id)) {
             return null;
         }
@@ -145,6 +154,7 @@ public class OrdemServicoService {
 
     @Transactional
     public Map<String, Object> repararVinculosComarcas() {
+        if (reservaV2 != null) reservaV2.lock();
         Map<String, Object> resultado = new HashMap<>();
         int ordensVinculadas = 0;
         int materiaisCriados = 0;
@@ -152,6 +162,8 @@ public class OrdemServicoService {
         int ordensSemProjeto = 0;
         int ordensSemComarca = 0;
         int conflitos = 0;
+        List<ReparoComarca> reparos = new ArrayList<>();
+        Set<Long> novosVinculos = new HashSet<>();
 
         for (OrdemServico ordem : ordemServicoRepository.findAll()) {
             if (ordem.getProjeto() == null || ordem.getProjeto().getId() == null) {
@@ -171,15 +183,38 @@ public class OrdemServicoService {
                 continue;
             }
 
-            if (comarca.getOrdemServico() == null) {
-                comarca.setOrdemServico(ordem);
-                ordensVinculadas++;
+            boolean vincular = comarca.getOrdemServico() == null;
+            if (vincular && !novosVinculos.add(comarca.getId())) {
+                conflitos++;
+                continue;
             }
 
-            SincronizacaoMateriais sync = sincronizarMateriaisPrevistos(comarca);
-            materiaisCriados += sync.criados();
-            materiaisAtualizados += sync.atualizados();
-            comarcaRepository.save(comarca);
+            try {
+                if (vincular && reservaV2 != null) {
+                    reservaV2.validarVinculoComarca(comarca.getId(), ordem.getId());
+                }
+                reparos.add(new ReparoComarca(comarca, ordem, vincular,
+                        planejarSincronizacao(comarca, ordem.getId())));
+            } catch (ResponseStatusException e) {
+                throw new IllegalStateException("Reparo não aplicado à OS " + ordem.getId() + ": " + e.getReason(), e);
+            }
+        }
+
+        // Valida o lote antes de alterar entidades ou inserir previsões com IDENTITY.
+        for (ReparoComarca reparo : reparos) {
+            if (reparo.vincular()) {
+                reparo.comarca().setOrdemServico(reparo.ordem());
+                ordensVinculadas++;
+            }
+            for (ReparoPrevisao previsao : reparo.previsoes()) {
+                aplicarPrevisao(reparo.comarca(), previsao);
+                if (previsao.existente() == null) {
+                    materiaisCriados++;
+                } else {
+                    materiaisAtualizados++;
+                }
+            }
+            comarcaRepository.save(reparo.comarca());
         }
 
         resultado.put("ordensVinculadas", ordensVinculadas);
@@ -205,7 +240,11 @@ public class OrdemServicoService {
         comarcaRepository.save(comarca);
         cadastrarMateriaisDaOs(comarca, materiaisPrevistos);
         comarca.setMateriais(materialItemRepository.findByComarcaIdOrderByIdAsc(comarca.getId()));
-        ordemRetiradaPort.criarParaOrdemServico(ordemServico, comarca, "Sistema");
+        boolean novaOrV2 = reservaV2 != null && reservaV2.osHabilitada(ordemServico.getId())
+                && comarca.getMateriais().stream().allMatch(i -> i.getMaterial() != null
+                    && i.getMaterial().getTipoControle() != com.poprc.demo.model.TipoControleEstoque.BOBINA
+                    && i.getMaterial().getTipoControle() != com.poprc.demo.model.TipoControleEstoque.ROLO);
+        if (!novaOrV2) ordemRetiradaPort.criarParaOrdemServico(ordemServico, comarca, "Sistema");
     }
 
     private void cadastrarMateriaisDaOs(Comarca comarca,
@@ -274,17 +313,10 @@ public class OrdemServicoService {
         return numeroOs;
     }
 
-    private SincronizacaoMateriais sincronizarMateriaisPrevistos(Comarca comarca) {
+    private List<ReparoPrevisao> planejarSincronizacao(Comarca comarca, Long osId) {
         List<MaterialProjeto> materiaisProjeto = materialProjetoRepository.findByProjetoId(comarca.getProjeto().getId());
-        Set<String> nomesJaSincronizados = comarca.getMateriais() == null
-                ? new java.util.HashSet<>()
-                : comarca.getMateriais().stream()
-                        .map(MaterialItem::getNomeMaterial)
-                        .filter(nome -> nome != null && !nome.isBlank())
-                        .map(nome -> nome.toLowerCase())
-                        .collect(Collectors.toSet());
-        int criados = 0;
-        int atualizados = 0;
+        Set<String> nomesNovos = new HashSet<>();
+        List<ReparoPrevisao> previsoes = new ArrayList<>();
 
         for (MaterialProjeto materialProjeto : materiaisProjeto) {
             if (materialProjeto.getMaterial() == null) {
@@ -302,42 +334,67 @@ public class OrdemServicoService {
                                     && item.getNomeMaterial().equalsIgnoreCase(nomeMaterial))
                             .findFirst();
 
-            if (materialExistente.isPresent()) {
-                MaterialItem item = materialExistente.get();
-                item.setMaterial(materialProjeto.getMaterial());
-                item.setQuantidadePrevista(valorOuZero(materialProjeto.getQuantidadePrevista()));
-                if (item.getQuantidadeAuditada().signum() == 0 && materialProjeto.getQuantidadeUtilizada() != null) {
-                    item.setQuantidadeAuditada(BigDecimal.valueOf(materialProjeto.getQuantidadeUtilizada()));
-                }
-                materialItemRepository.save(item);
-                atualizados++;
+            MaterialItem existente = materialExistente.orElse(null);
+            if (existente == null && !nomesNovos.add(nomeMaterial.toLowerCase())) {
                 continue;
             }
 
-            if (nomesJaSincronizados.contains(nomeMaterial.toLowerCase())) {
-                continue;
-            }
-
-            MaterialItem novoItem = new MaterialItem();
-            novoItem.setComarca(comarca);
-            novoItem.setMaterial(materialProjeto.getMaterial());
-            novoItem.setNomeMaterial(nomeMaterial);
-            novoItem.setQuantidadePrevista(valorOuZero(materialProjeto.getQuantidadePrevista()));
-            novoItem.setQuantidadeAuditada(valorOuZero(materialProjeto.getQuantidadeUtilizada()));
-            novoItem.setEstoqueBaixado(false);
-            materialItemRepository.save(novoItem);
-            nomesJaSincronizados.add(nomeMaterial.toLowerCase());
-            criados++;
+            Material material = materialProjeto.getMaterial();
+            BigDecimal quantidade = valorOuZero(materialProjeto.getQuantidadePrevista());
+            validarReparoPrevisao(osId, existente, material, quantidade);
+            previsoes.add(new ReparoPrevisao(existente, material, nomeMaterial, quantidade,
+                    valorOuZero(materialProjeto.getQuantidadeUtilizada())));
         }
+        return previsoes;
+    }
 
-        return new SincronizacaoMateriais(criados, atualizados);
+    private void validarReparoPrevisao(Long osId, MaterialItem existente, Material material, BigDecimal quantidade) {
+        if (existente != null) {
+            boolean mesmoMaterial = existente.getMaterial() != null
+                    && Objects.equals(existente.getMaterial().getId(), material.getId());
+            if (mesmoMaterial && existente.getQuantidadePrevista().compareTo(quantidade) == 0) {
+                return;
+            }
+            if (reservaV2 != null) {
+                reservaV2.semReservaItem(existente.getId());
+            }
+            if (Boolean.TRUE.equals(existente.getEstoqueReservado())
+                    || Boolean.TRUE.equals(existente.getEstoqueBaixado())
+                    || existente.getQuantidadeRetiradaV2().signum() > 0) {
+                throw new IllegalStateException("Reparo não aplicado à OS " + osId + ": a previsão "
+                        + existente.getId() + " tem reserva ou retirada. Use o fluxo de alteração de previsão da OS.");
+            }
+        }
+        if (reservaV2 != null) {
+            reservaV2.validarPrevisaoNoRegime(osId, material);
+        }
+    }
+
+    private void aplicarPrevisao(Comarca comarca, ReparoPrevisao previsao) {
+        MaterialItem item = previsao.existente();
+        if (item == null) {
+            item = new MaterialItem();
+            item.setComarca(comarca);
+            item.setNomeMaterial(previsao.nome());
+        }
+        item.setMaterial(previsao.material());
+        item.setQuantidadePrevista(previsao.quantidade());
+        if (item.getQuantidadeAuditada().signum() == 0) {
+            item.setQuantidadeAuditada(previsao.auditada());
+        }
+        materialItemRepository.save(item);
     }
 
     private BigDecimal valorOuZero(Integer valor) {
         return BigDecimal.valueOf(valor != null ? valor : 0);
     }
 
-    private record SincronizacaoMateriais(int criados, int atualizados) {
+    private record ReparoComarca(Comarca comarca, OrdemServico ordem, boolean vincular,
+                                 List<ReparoPrevisao> previsoes) {
+    }
+
+    private record ReparoPrevisao(MaterialItem existente, Material material, String nome,
+                                  BigDecimal quantidade, BigDecimal auditada) {
     }
 }
 

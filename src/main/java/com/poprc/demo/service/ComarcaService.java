@@ -47,6 +47,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class ComarcaService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
 
     private static final Set<String> EXTENSOES_FOTO_VISTORIA = Set.of("jpg", "jpeg", "png");
     private static final Set<String> MIME_FOTO_VISTORIA = Set.of("image/jpeg", "image/jpg", "image/png");
@@ -110,6 +113,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca atualizarProgresso(Long id, BigDecimal percentualConcluido, String situacao) {
+        if (reservaV2 != null) reservaV2.lock();
         Optional<Comarca> comarcaOpt = buscarComarcaTravada(id);
         if (comarcaOpt.isPresent()) {
             Comarca comarca = comarcaOpt.get();
@@ -146,6 +150,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca atualizarComarca(Long id, BigDecimal percentualConcluido, String pendencias) {
+        if (reservaV2 != null) reservaV2.lock();
         Optional<Comarca> comarcaOpt = comarcaRepository.findById(id);
         if (comarcaOpt.isPresent()) {
             Comarca comarca = comarcaOpt.get();
@@ -161,6 +166,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca salvarFotoVistoria(Long id, MultipartFile foto) {
+        if (reservaV2 != null) reservaV2.lock();
         if (foto == null || foto.isEmpty()) {
             throw new ArquivoInvalidoException("A foto da vistoria é obrigatória.");
         }
@@ -179,6 +185,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca salvarAssinaturaVistoria(Long id, String assinaturaBase64) {
+        if (reservaV2 != null) reservaV2.lock();
         if (assinaturaBase64 == null || assinaturaBase64.isBlank()) {
             throw new IllegalArgumentException("A assinatura da vistoria é obrigatória.");
         }
@@ -197,6 +204,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca salvarProvaViradaRede(Long id, MultipartFile foto) {
+        if (reservaV2 != null) reservaV2.lock();
         if (foto == null || foto.isEmpty()) {
             throw new ArquivoInvalidoException("A prova de funcionamento da Virada de Rede é obrigatória.");
         }
@@ -214,6 +222,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca removerFotoVistoria(Long id) {
+        if (reservaV2 != null) reservaV2.lock();
         Comarca comarca = comarcaRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
         validarVistoriaEditavel(comarca);
@@ -226,6 +235,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca removerAssinaturaVistoria(Long id) {
+        if (reservaV2 != null) reservaV2.lock();
         Comarca comarca = comarcaRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
         validarVistoriaEditavel(comarca);
@@ -236,6 +246,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca removerProvaViradaRede(Long id) {
+        if (reservaV2 != null) reservaV2.lock();
         Comarca comarca = comarcaRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
         validarViradaRedeEditavel(comarca);
@@ -247,6 +258,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca avancarParaInfraestrutura(Long id) {
+        if (reservaV2 != null) reservaV2.lock();
         Comarca comarca = comarcaRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
 
@@ -280,6 +292,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca salvarViradaRede(Long id, String provasFuncionamento, String checklist, Boolean concluida) {
+        if (reservaV2 != null) reservaV2.lock();
         Comarca comarca = comarcaRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
 
@@ -357,6 +370,7 @@ public class ComarcaService {
 
     @Transactional
     public Map<String, Object> atualizarQuantidadeAuditada(Long materialId, BigDecimal quantidadeAuditada) {
+        if (reservaV2 != null) reservaV2.lock();
         if (quantidadeAuditada == null || quantidadeAuditada.signum() < 0) {
             throw new IllegalArgumentException("A quantidade auditada deve ser maior ou igual a zero.");
         }
@@ -385,12 +399,14 @@ public class ComarcaService {
 
     @Transactional
     public Comarca adicionarMaterialPrevisto(Long comarcaId, Long materialId, String nomeMaterial, BigDecimal quantidadePrevista) {
+        if (reservaV2 != null) reservaV2.lock();
         validarMaterialPrevisto(nomeMaterial, quantidadePrevista);
 
         Comarca comarca = buscarComarcaTravada(comarcaId)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
         validarAsBuiltAbertoParaMateriais(comarca);
         Material materialEstoque = obterMaterialEstoque(materialId);
+        if (reservaV2 != null) reservaV2.validarPrevisaoNoRegime(comarca.getOrdemServico() == null ? null : comarca.getOrdemServico().getId(), materialEstoque);
         validarEscalaQuantidade(materialEstoque, quantidadePrevista);
         validarSaldoReserva(materialEstoque, quantidadePrevista, BigDecimal.ZERO);
 
@@ -413,6 +429,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca atualizarMaterialPrevisto(Long materialItemId, Long materialId, String nomeMaterial, BigDecimal quantidadePrevista) {
+        if (reservaV2 != null) reservaV2.lock();
         validarMaterialPrevisto(nomeMaterial, quantidadePrevista);
 
         MaterialItem material = materialItemRepository.findById(materialItemId)
@@ -421,12 +438,14 @@ public class ComarcaService {
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
         validarAsBuiltAbertoParaMateriais(comarca);
         entityManager.refresh(material);
+        if (reservaV2 != null) reservaV2.semReservaItem(material.getId());
         if (Boolean.TRUE.equals(material.getEstoqueBaixado())) {
             throw new IllegalArgumentException("Material já baixado no estoque não pode ser alterado.");
         }
         liberarReservaEstoque(comarca, material, material.getQuantidadePrevista());
 
         Material materialEstoque = obterMaterialEstoque(materialId);
+        if (reservaV2 != null) reservaV2.validarPrevisaoNoRegime(comarca.getOrdemServico() == null ? null : comarca.getOrdemServico().getId(), materialEstoque);
         validarEscalaQuantidade(materialEstoque, quantidadePrevista);
         validarSaldoReserva(materialEstoque, quantidadePrevista, BigDecimal.ZERO);
         material.setMaterial(materialEstoque);
@@ -444,6 +463,7 @@ public class ComarcaService {
     @Transactional
     public Comarca atualizarMateriaisFaltantes(Long comarcaId, Boolean faltouMaterial, List<Long> materialItemIds,
             String descricao) {
+        if (reservaV2 != null) reservaV2.lock();
         Comarca comarca = buscarComarcaTravada(comarcaId)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
         validarAsBuiltAbertoParaMateriais(comarca);
@@ -488,12 +508,14 @@ public class ComarcaService {
 
     @Transactional
     public Comarca adicionarItemAdicional(Long comarcaId, Long materialId, String nomeMaterial, BigDecimal quantidadePrevista) {
+        if (reservaV2 != null) reservaV2.lock();
         validarMaterialPrevisto(nomeMaterial, quantidadePrevista);
 
         Comarca comarca = buscarComarcaTravada(comarcaId)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
         validarAsBuiltAbertoParaMateriais(comarca);
         Material materialEstoque = obterMaterialEstoque(materialId);
+        if (reservaV2 != null) reservaV2.validarPrevisaoNoRegime(comarca.getOrdemServico() == null ? null : comarca.getOrdemServico().getId(), materialEstoque);
         validarEscalaQuantidade(materialEstoque, quantidadePrevista);
         validarSaldoReserva(materialEstoque, quantidadePrevista, BigDecimal.ZERO);
 
@@ -515,6 +537,7 @@ public class ComarcaService {
     @Transactional
     public Comarca atualizarTimelineMaterial(Long materialItemId, LocalDateTime dataHoraSolicitacao,
             LocalDateTime dataHoraRetirada, LocalDateTime dataHoraUso) {
+        if (reservaV2 != null) reservaV2.lock();
         validarOrdemTimeline(dataHoraSolicitacao, dataHoraRetirada, dataHoraUso);
 
         MaterialItem material = materialItemRepository.findById(materialItemId)
@@ -547,12 +570,14 @@ public class ComarcaService {
 
     @Transactional
     public Comarca removerMaterialPrevisto(Long materialId) {
+        if (reservaV2 != null) reservaV2.lock();
         MaterialItem material = materialItemRepository.findById(materialId)
                 .orElseThrow(() -> new IllegalArgumentException("Material previsto não encontrado."));
         Comarca comarca = buscarComarcaTravada(material.getComarca().getId())
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
         validarAsBuiltAbertoParaMateriais(comarca);
         entityManager.refresh(material);
+        if (reservaV2 != null) reservaV2.semReservaItem(material.getId());
         if (Boolean.TRUE.equals(material.getEstoqueBaixado())) {
             throw new IllegalArgumentException("Material já baixado no estoque não pode ser removido.");
         }
@@ -571,11 +596,13 @@ public class ComarcaService {
 
     @Transactional
     public Map<String, Object> homologarAsBuilt(Long id, String justificativa) {
+        if (reservaV2 != null) reservaV2.lock();
         return homologarAsBuilt(id, justificativa, "Auditoria de Retirada/Devolução");
     }
 
     @Transactional
     public Map<String, Object> homologarAsBuilt(Long id, String justificativa, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         // Preserva alterações pendentes na transação antes de atualizar a entidade bloqueada.
         entityManager.flush();
         Comarca comarca = buscarComarcaTravada(id)
@@ -618,6 +645,7 @@ public class ComarcaService {
 
     @Transactional
     public EncerramentoObraResultado concluirObra(Long id, String concluidaPor) {
+        if (reservaV2 != null) reservaV2.lock();
         Comarca comarca = buscarComarcaTravada(id)
                 .orElseThrow(() -> new IllegalArgumentException("Obra não encontrada."));
         boolean simulacao = comarca.getOrdemServico() != null && comarca.getOrdemServico().isSimulacao();
@@ -649,7 +677,7 @@ public class ComarcaService {
         if (ordensRetirada.isEmpty()) {
             throw new IllegalArgumentException("A obra não possui Ordem de Retirada vinculada.");
         }
-        if (ordensRetirada.stream().anyMatch(ordem -> !"DEVOLVIDA".equals(ordem.getStatus()))) {
+        if (ordensRetirada.stream().filter(ordem -> !ordem.isNovoFluxo() || !("RASCUNHO_V2".equals(ordem.getStatus()) || "CANCELADA_V2".equals(ordem.getStatus()))).anyMatch(ordem -> !"DEVOLVIDA".equals(ordem.getStatus()))) {
             throw new IllegalArgumentException("Todas as Ordens de Retirada precisam estar devolvidas.");
         }
 
@@ -691,6 +719,7 @@ public class ComarcaService {
 
     @Transactional
     public Map<String, Object> reabrirAsBuilt(Long id) {
+        if (reservaV2 != null) reservaV2.lock();
         Comarca comarca = buscarComarcaTravada(id)
                 .orElseThrow(() -> new IllegalArgumentException("Comarca não encontrada."));
 
@@ -762,6 +791,7 @@ public class ComarcaService {
 
     @Transactional
     public Comarca criarOuVincularComarcaParaProjeto(Projeto projeto) {
+        if (reservaV2 != null) reservaV2.lock();
         return comarcaRepository.findByProjetoId(projeto.getId())
                 .orElseGet(() -> {
                     Comarca nova = new Comarca();
@@ -895,8 +925,8 @@ public class ComarcaService {
                         ? valorMovimentacao(movimentacao).negate()
                         : valorMovimentacao(movimentacao))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal reservado = Boolean.TRUE.equals(item.getEstoqueReservado()) && !Boolean.TRUE.equals(item.getEstoqueBaixado())
-                ? item.getQuantidadePrevista()
+        BigDecimal reservado = Boolean.TRUE.equals(item.getEstoqueReservado())
+                ? item.getQuantidadePrevista().subtract(item.getQuantidadeRetiradaV2()).max(BigDecimal.ZERO)
                 : BigDecimal.ZERO;
         BigDecimal previsto = item.getQuantidadePrevista();
         BigDecimal auditado = item.getQuantidadeAuditada();

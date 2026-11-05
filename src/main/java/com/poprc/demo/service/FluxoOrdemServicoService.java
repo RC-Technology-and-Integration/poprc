@@ -18,6 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class FluxoOrdemServicoService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
 
     private final OrdemServicoRepository ordemServicoRepository;
     private final HistoricoStatusOSRepository historicoRepository;
@@ -27,6 +30,7 @@ public class FluxoOrdemServicoService {
 
     @Transactional
     public OrdemServico iniciar(OrdemServico ordem, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         ordem.setStatus(StatusOS.AGUARDANDO_VISTORIA);
         OrdemServico salva = ordemServicoRepository.save(ordem);
         registrar(salva, null, StatusOS.AGUARDANDO_VISTORIA, "OS_CRIADA", responsavel);
@@ -35,6 +39,7 @@ public class FluxoOrdemServicoService {
 
     @Transactional
     public OrdemServico transicionarPorUsuario(Long ordemId, StatusOS destino, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemServico ordem = buscarAtiva(ordemId);
         StatusOS atual = statusAtual(ordem);
 
@@ -55,6 +60,7 @@ public class FluxoOrdemServicoService {
 
     @Transactional
     public OrdemServico registrarVistoriaLiberada(Long ordemId, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemServico ordem = buscarAtiva(ordemId);
         StatusOS atual = statusAtual(ordem);
         if (atual == StatusOS.AGUARDANDO_RETIRADA) {
@@ -68,6 +74,7 @@ public class FluxoOrdemServicoService {
 
     @Transactional
     public OrdemServico registrarRetirada(Long ordemId, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemServico ordem = buscarAtiva(ordemId);
         StatusOS atual = statusAtual(ordem);
         if (atual == StatusOS.EM_EXECUCAO) {
@@ -82,6 +89,7 @@ public class FluxoOrdemServicoService {
 
     @Transactional
     public void validarRetiradaPermitida(Long ordemId) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemServico ordem = buscarAtiva(ordemId);
         StatusOS atual = statusAtual(ordem);
         if (atual != StatusOS.AGUARDANDO_RETIRADA && atual != StatusOS.EM_EXECUCAO) {
@@ -92,6 +100,7 @@ public class FluxoOrdemServicoService {
 
     @Transactional
     public OrdemServico registrarDevolucao(Long ordemId, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemServico ordem = buscarAtiva(ordemId);
         if (statusAtual(ordem) != StatusOS.AGUARDANDO_DEVOLUCAO || !todasOrdensRetiradaDevolvidas(ordemId)) {
             return ordem;
@@ -101,6 +110,7 @@ public class FluxoOrdemServicoService {
 
     @Transactional
     public OrdemServico registrarAsBuiltHomologado(Long ordemId, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemServico ordem = buscarAtiva(ordemId);
         StatusOS atual = statusAtual(ordem);
         if (atual == StatusOS.AGUARDANDO_ENCERRAMENTO) {
@@ -115,6 +125,7 @@ public class FluxoOrdemServicoService {
 
     @Transactional
     public OrdemServico registrarEncerramento(Long ordemId, String responsavel) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemServico ordem = buscarAtiva(ordemId);
         StatusOS atual = statusAtual(ordem);
         if (atual == StatusOS.CONCLUIDA) {
@@ -227,7 +238,7 @@ public class FluxoOrdemServicoService {
     }
 
     private boolean todasOrdensRetiradaDevolvidas(Long ordemId) {
-        var ordens = ordemRetiradaRepository.findByOrdemServicoIdOrderByDataGeracaoDesc(ordemId);
+        var ordens = ordemRetiradaRepository.findByOrdemServicoIdOrderByDataGeracaoDesc(ordemId).stream().filter(or -> !or.isNovoFluxo() || !("RASCUNHO_V2".equals(or.getStatus()) || "CANCELADA_V2".equals(or.getStatus()))).toList();
         return !ordens.isEmpty() && ordens.stream().allMatch(or -> "DEVOLVIDA".equals(or.getStatus()));
     }
 

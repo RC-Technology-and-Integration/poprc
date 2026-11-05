@@ -46,6 +46,9 @@ import org.w3c.dom.NodeList;
 @Service
 @RequiredArgsConstructor
 public class ImportacaoNotaFiscalEstoqueService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
     private static final int LIMITE_ARQUIVO = 10 * 1024 * 1024;
     private static final Pattern LINHA_DANFE = Pattern.compile(
             "^\\s*(\\S+)\\s+(.+?)\\s+(\\d{8})\\s+\\d{3,4}\\s+(\\d{4})\\s+([A-Z]{1,6})\\s+([\\d.,]+)\\s+([\\d.,]+)\\s+([\\d.,]+)(?:\\s|$).*");
@@ -79,6 +82,7 @@ public class ImportacaoNotaFiscalEstoqueService {
     @Transactional
     public NotaFiscalEstoqueDTO.Resultado confirmar(
             NotaFiscalEstoqueDTO.ConfirmarRequest request, UsuarioAutenticado usuario) {
+        if (reservaV2 != null) reservaV2.lock();
         if (usuario == null) throw new IllegalArgumentException("Usuário autenticado não identificado.");
         Arquivo arquivo = validarArquivo(request.nomeArquivo(), request.contentType(), request.arquivoBase64());
         if (request.hashSha256() == null || !arquivo.hash().equalsIgnoreCase(request.hashSha256())) {
