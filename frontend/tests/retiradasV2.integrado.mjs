@@ -14,7 +14,8 @@ await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, headless: true });
 const relatorio = { base, backendReal: true, mocks: false, tamanhos: [], requisicoes: {}, errosPagina: [] };
 let ultimaPagina;
-let requisicoes = [];
+const rede = [];
+relatorio.rede = rede;
 async function sessao(perfil) {
   const context = await browser.newContext({ baseURL: base, viewport: { width: 1440, height: 1000 } });
   const conta = fixture.contas.find(c => c.perfil === perfil);
@@ -22,10 +23,24 @@ async function sessao(perfil) {
   assert.equal(login.status(), 200, await login.text());
   const page = await context.newPage();
   ultimaPagina = page;
-  page.on('response', async r => {if(r.status() >= 400 && r.url().includes('/api/')) (relatorio.falhasHttp ||= []).push({url:r.url(),status:r.status(),texto:(await r.text()).slice(0,800)});});
-  page.on('request', r => { if (r.url().includes('/api/')) requisicoes.push(`${r.method()} ${new URL(r.url()).pathname}`); });
+  const requisicoes = [];
+  page.on('response', r => {
+    const url = new URL(r.url());
+    if (r.status() >= 400 && url.pathname.startsWith('/api/')) {
+      (relatorio.falhasHttp ||= []).push({ perfil, metodo: r.request().method(),
+        url: url.origin + url.pathname, status: r.status() });
+    }
+  });
+  page.on('request', r => {
+    const url = new URL(r.url());
+    if (!url.pathname.startsWith('/api/')) return;
+    const evento = { perfil, metodo: r.method(), url: url.origin + url.pathname,
+      momento: new Date().toISOString(), secao: new URL(page.url()).pathname };
+    rede.push(evento);
+    requisicoes.push(evento);
+  });
   page.on('pageerror', e => relatorio.errosPagina.push(e.message));
-  return { context, page };
+  return { context, page, requisicoes };
 }
 async function carregar(page, path) { await page.goto(path);await page.locator('.retiradas-v2').waitFor();await page.getByText('Carregando retiradas…', { exact: true }).waitFor({ state: 'hidden' }); }
 async function assertSemOverflow(page, largura) {assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `overflow ${largura}px`);}
@@ -35,7 +50,6 @@ try {
   const materiais = await (await context.request.get('/api/estoque/materiais')).json();
   const material = materiais.find(m => m.id === fixture.materialId);
   assert.ok(material);
-  requisicoes = [];
   await carregar(page, '/estoque/retiradas?nova=1');
   await page.getByRole('heading', { name: 'Preparar retirada', exact: true }).waitFor();
   await page.getByLabel('Depósito único').selectOption(String(fixture.localId));
@@ -84,11 +98,18 @@ try {
   await page.getByRole('button', { name: 'Conferir comprovante', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'explicitamente' }).waitFor();
   relatorio.autorrevisaoAutomaticaNegada = true;
-  const sup = await sessao('SUPERVISOR_TECNICO');requisicoes = [];
-  await carregar(sup.page, `/estoque/pendencias?or=${orId}`);
+  const sup = await sessao('SUPERVISOR_TECNICO');
+  // Uma página ADMIN ainda pode atualizar Retiradas enquanto a supervisão abre Pendências.
+  const pedidoAdmin = page.waitForRequest(r => new URL(r.url()).pathname === '/api/estoque/importacoes/planilha/retiradas');
+  await Promise.all([
+    page.reload(),
+    pedidoAdmin,
+    carregar(sup.page, `/estoque/pendencias?or=${orId}`),
+  ]);
   await sup.page.getByRole('button', { name: 'Conferir comprovante', exact: true }).waitFor();
-  relatorio.requisicoes.pendenciasSupervisor = [...requisicoes];
-  assert.ok(!requisicoes.some(r => /\/api\/estoque\/|\/api\/contratos|\/api\/funcionarios|\/api\/comarcas/.test(r)), 'seções inativas não devem carregar');
+  relatorio.requisicoes.pendenciasSupervisor = [...sup.requisicoes];
+  const inesperadas = sup.requisicoes.filter(r => /\/api\/estoque\/|\/api\/contratos|\/api\/funcionarios|\/api\/comarcas/.test(new URL(r.url).pathname));
+  assert.deepEqual(inesperadas, [], 'seções inativas não devem carregar');
   await sup.page.getByLabel('Justificativa (obrigatória na rejeição e autorrevisão)').fill('Documento sintético rejeitado para exercitar reenvio');
   await sup.page.getByRole('button', { name: 'Rejeitar e manter pendência' }).click();
   await sup.page.getByText('REJEITADO', { exact: true }).waitFor();
@@ -138,5 +159,19 @@ try {
   assert.deepEqual(relatorio.errosPagina, []);
   await sup.context.close();await context.close();
   relatorio.resultado='APROVADO';
-} catch(e) {relatorio.resultado='FALHOU';relatorio.erro=String(e.stack || e);if(ultimaPagina){await ultimaPagina.screenshot({path:`${out}/falha.png`,fullPage:true});relatorio.telaNaFalha=(await ultimaPagina.locator('body').innerText()).slice(-7000);}throw e;}
-finally {await writeFile(`${out}/RESULTADO_E2E.json`,JSON.stringify(relatorio,null,2));await browser.close();}
+} catch (e) {
+  relatorio.resultado = 'FALHOU';
+  relatorio.erro = String(e.stack || e);
+  if (ultimaPagina) {
+    const [captura, tela] = await Promise.allSettled([
+      ultimaPagina.screenshot({ path: out + '/falha.png', fullPage: true }),
+      ultimaPagina.locator('body').innerText(),
+    ]);
+    if (captura.status === 'rejected') relatorio.erroCaptura = String(captura.reason);
+    if (tela.status === 'fulfilled') relatorio.telaNaFalha = tela.value.slice(-7000);
+  }
+  throw e;
+} finally {
+  await writeFile(out + '/RESULTADO_E2E.json', JSON.stringify(relatorio, null, 2));
+  await browser.close();
+}
