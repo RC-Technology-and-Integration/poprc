@@ -26,7 +26,7 @@ class Postgres16MigrationCiTest {
     private static final String ADMIN_URL = "jdbc:postgresql://localhost:5432/postgres";
 
     @Test
-    void atualizacaoV38AV40PreservaHomologacoesLegadas() throws Exception {
+    void atualizacaoV38AV42PreservaHomologacoesLegadas() throws Exception {
         validarServidorDescartavel();
         String user = requiredEnv("TEST_DB_USERNAME");
         String password = requiredEnv("TEST_DB_PASSWORD");
@@ -44,7 +44,7 @@ class Postgres16MigrationCiTest {
             seedLegacyRows(legacy, user, password);
 
             flyway(legacy, user, password, null).migrate();
-            assertMigrationCount(legacy, user, password, 40);
+            assertMigrationCount(legacy, user, password, 42);
             assertLegacyRowsPreserved(legacy, user, password);
         } finally {
             for (String database : created) {
@@ -55,14 +55,14 @@ class Postgres16MigrationCiTest {
     }
 
     @Test
-    void bancoVazioRecebeV1AV40() throws Exception {
+    void bancoVazioRecebeV1AV42() throws Exception {
         validarServidorDescartavel();
         String user = requiredEnv("TEST_DB_USERNAME"), password = requiredEnv("TEST_DB_PASSWORD");
         String database = "poprc_ci_fresh_" + UUID.randomUUID().toString().replace("-", "") + "_test";
         createDatabase(database, user, password);
         try {
-            assertEquals(40, flyway(database, user, password, null).migrate().migrationsExecuted);
-            assertMigrationCount(database, user, password, 40);
+            assertEquals(42, flyway(database, user, password, null).migrate().migrationsExecuted);
+            assertMigrationCount(database, user, password, 42);
         } finally {
             dropDatabase(database, user, password);
             assertFalse(databaseExists(database, user, password));

@@ -82,7 +82,7 @@ jobs:
       - name: Validar scripts de implantacao
         run: bash -n deploy/scripts/*.sh
 
-      - name: Validar V1-V40, V38-V40 e somente V40 sobre V39 no PostgreSQL 16
+      - name: Validar V1-V42, legado e somente V40 sobre V39 no PostgreSQL 16
         run: ./mvnw --batch-mode -Dspring.config.import= -Dpoprc.pg16.migration=true -Dtest=Postgres16MigrationCiTest,SimulacaoMigrationTest test
 
       - name: Executar abertura em banco exclusivo com Java 25 e PostgreSQL 16
@@ -182,6 +182,32 @@ jobs:
         working-directory: frontend
         run: npm ci && npx playwright install --with-deps chromium
 
+      - name: Jornada de retiradas com PostgreSQL e arquivos descartáveis
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TEST_DB_URL="$(python3 -c "import json; print(json.load(open('target/test-uploads/FIXTURE_UI.json'))['databaseUrl'])")"
+          export TEST_DB_USERNAME="$(python3 -c "import json; print(json.load(open('target/test-uploads/FIXTURE_UI.json'))['databaseUser'])")"
+          # A fixture e seu banco são criados pelo próprio teste V2 e preservados até o fim deste job.
+          java -Dapp.upload.dir="$PWD/target/test-uploads" -jar target/demo-0.0.1-SNAPSHOT.jar \
+            --spring.config.import= --spring.profiles.active=test --server.address=127.0.0.1 --server.port=18085 \
+            --app.security.enabled=true --app.security.dev-login-enabled=false --app.security.zoho-enabled=false \
+            --app.ambiente=teste-local --app.retiradas-v2.enabled=true --alerts.email.enabled=false \
+            > target/retiradas-v2-backend.log 2>&1 &
+          api_pid=$!
+          VITE_PROXY_TARGET=http://127.0.0.1:18085 node frontend/node_modules/vite/bin/vite.js frontend --host 127.0.0.1 --port 15173 > target/retiradas-v2-frontend.log 2>&1 &
+          web_pid=$!
+          trap 'kill "$web_pid" "$api_pid" 2>/dev/null || true' EXIT
+          for i in {1..90}; do curl -fsS http://127.0.0.1:18085/actuator/health >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:18085/actuator/health >/dev/null
+          POP_RC_E2E_BASE_URL=http://127.0.0.1:15173 \
+          POP_RC_E2E_FIXTURE="$PWD/target/test-uploads/FIXTURE_UI.json" \
+          POP_RC_E2E_OUT="$PWD/target/retiradas-v2-e2e" \
+          POP_RC_E2E_UPLOADS="$PWD/target/test-uploads" \
+          POP_RC_E2E_COMPROVANTE="$PWD/target/test-uploads/COMPROVANTE_SINTETICO.png" \
+            node frontend/tests/retiradasV2.integrado.mjs
+
+
       - name: Capturar TESTE pelo fluxo normal em banco e uploads novos
         env:
           PGPASSWORD: postgres
@@ -226,6 +252,10 @@ jobs:
             target/cadastro-post-estado-evidencias
             target/jsoup-ci
             target/simulacao-pdf-review
+            target/retiradas-v2-e2e
+            target/f02-restart-*
+            target/retiradas-v2-backend.log
+            target/retiradas-v2-frontend.log
             frontend/test-results
             frontend/playwright-report
             ${{ runner.temp }}/backend-e2e.log

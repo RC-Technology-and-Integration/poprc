@@ -208,7 +208,7 @@ class AsBuiltConcorrenciaIntegrationTest {
                       where datname = current_database()
                         and pid <> pg_backend_pid()
                         and wait_event_type = 'Lock'
-                        and query ilike '%comarcas%'
+                        and (query ilike '%comarcas%' or query ilike '%pg_advisory_xact_lock(7316041)%')
                     )
                     """, Boolean.class);
             if (Boolean.TRUE.equals(aguardando)) return;
