@@ -167,7 +167,9 @@ class EnsaioAberturaEstoqueTest {
             var a=pool.submit(task);var b=pool.submit(task);assertTrue(ready.await(10,TimeUnit.SECONDS));go.countDown();
             var outcomes=List.of(a.get(30,TimeUnit.SECONDS),b.get(30,TimeUnit.SECONDS));
             assertEquals(1,outcomes.stream().filter("SUCESSO"::equals).count());
-            assertTrue(outcomes.stream().allMatch(x -> Set.of("SUCESSO", "DataIntegrityViolationException", "IllegalArgumentException").contains(x)), outcomes.toString());
+            // O concorrente pode atingir o limite do guard antes de verificar a duplicidade.
+            assertTrue(outcomes.stream().allMatch(x -> Set.of("SUCESSO", "DataIntegrityViolationException",
+                    "IllegalArgumentException", "EsperaEstoqueExcedidaException").contains(x)), outcomes.toString());
             verifyFull();
         }
     }

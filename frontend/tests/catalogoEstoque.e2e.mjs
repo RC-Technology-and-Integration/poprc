@@ -24,6 +24,12 @@ test.beforeEach(async ({ page }) => {
     const respostas = {
       '/api/auth/config': { securityEnabled: true, devLoginEnabled: false },
       '/api/auth/csrf': { token: 'FICTICIO' },
+      '/api/ordens-retirada/v2/config': {
+        habilitado: false, osHabilitadas: [], todasOsHabilitadas: false,
+        calendario: { fuso: 'America/Sao_Paulo', diasUteis: 3, feriados: [], aviso: 'Feriados operacionais não configurados.' },
+        limiteItens: 100, tiposLegados: ['BOBINA', 'ROLO'],
+      },
+      '/api/ordens-retirada/v2': { itens: [], pagina: Number(url.searchParams.get('pagina') || 0), mais: false },
       '/api/auth/me': { funcionarioId: 999, nome: 'ADMIN FICTICIO', perfil: 'ADMIN', trocaSenhaObrigatoria: false },
       '/api/estoque/materiais': materiais,
       '/api/estoque/locais': [{ id: 1, nome: 'Depósito fictício' }],
@@ -170,7 +176,12 @@ test('catálogo não monta histórico, ORs ou integração; pendências não inv
   await expect(page.getByRole('button',{name:'Importar .xlsx',exact:true})).toHaveCount(0);
   const calls=[];page.on('request',req=>{if(new URL(req.url()).pathname.startsWith('/api/estoque/'))calls.push(req.url())});
   await page.goto(`${baseURL}/estoque/pendencias`);await expect(page.locator('h1')).toHaveText('Pendências documentais');
-  await expect(page.getByText('INDISPONÍVEL NO FLUXO ATUAL',{exact:true})).toBeVisible();
+  await expect(page.getByRole('status').filter({
+    hasText: 'Novas criações e emissões desabilitadas pelo servidor.',
+  })).toBeVisible();
+  await expect(page.getByText('Nenhuma OR encontrada nesta fila.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Nova retirada', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Conferir comprovante', exact: true })).toHaveCount(0);
   expect(calls).toEqual([]);
   await expect(page.locator('[data-testid=catalogo-cards]')).toHaveCount(0);
   await page.goto(`${baseURL}/estoque/integracao`);
@@ -203,7 +214,7 @@ test('perfil ESTOQUE mantém acesso às subrotas e opções restritas de contrat
  await page.route('**/api/auth/me',r=>r.fulfill({contentType:'application/json',body:JSON.stringify({funcionarioId:999,nome:'ESTOQUE FICTÍCIO',perfil:'ESTOQUE',trocaSenhaObrigatoria:false})}));
  await page.reload();await expect(page.locator('h1')).toHaveText('Materiais e saldos');
  await page.getByRole('link',{name:'Retiradas',exact:true}).click();await expect(page.locator('h1')).toHaveText('Retiradas');
- await expect(page.getByRole('button',{name:'Executar OR',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Executar OR legada',exact:true})).toBeVisible();
 });
 
 for(const width of [390,320]) test(`menu de estoque funciona por teclado no celular ${width}`,async({page})=>{

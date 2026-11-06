@@ -29,6 +29,8 @@ public class MaterialItem {
     private BigDecimal quantidadeAuditada = BigDecimal.ZERO;
     private Boolean estoqueReservado = false;
     private Boolean estoqueBaixado = false;
+    @Column(precision = 14, scale = 3, nullable = false)
+    private BigDecimal quantidadeRetiradaV2 = BigDecimal.ZERO;
     private Boolean materialFaltante = false;
     private Boolean itemAdicional = false;
 

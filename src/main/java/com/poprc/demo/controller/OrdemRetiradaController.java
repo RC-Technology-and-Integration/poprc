@@ -31,6 +31,7 @@ public class OrdemRetiradaController {
     private final OrdemRetiradaService ordemRetiradaService;
     private final OrdemRetiradaPdfService ordemRetiradaPdfService;
     private final AcessoOperacionalService acessoOperacionalService;
+    private final com.poprc.demo.service.RetiradaV2Service retiradaV2Service;
 
     @GetMapping
     public ResponseEntity<List<OrdemRetirada>> listarTodas(Authentication authentication) {
@@ -60,7 +61,9 @@ public class OrdemRetiradaController {
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=ordem-retirada-" + id + ".pdf")
-                .body(ordemRetiradaPdfService.obterPdfArquivado(id));
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(retiradaV2Service.novoRegime(id) ? retiradaV2Service.emissaoAtual(id, authentication).bytes()
+                        : ordemRetiradaPdfService.obterPdfArquivado(id));
     }
 
     @GetMapping("/{id}/documentos")

@@ -44,6 +44,8 @@ public class OrdemRetirada {
 
     private String status = "GERADA";
 
+    private boolean novoFluxo = false;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "ordem_servico_id")
     @JsonIgnoreProperties({ "contrato", "projeto", "hibernateLazyInitializer", "handler" })

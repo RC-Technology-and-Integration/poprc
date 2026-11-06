@@ -19,6 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class SaldoLocalService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
     private static final String ESTOQUE_PRINCIPAL = "Estoque Principal";
 
     private final LocalEstoqueRepository localRepository;
@@ -39,6 +42,7 @@ public class SaldoLocalService {
 
     @Transactional
     public SaldoMaterialLocal atualizarEstoqueMinimo(Long saldoId, BigDecimal estoqueMinimo) {
+        if (reservaV2 != null) reservaV2.lock();
         SaldoMaterialLocal saldo = saldoRepository.findByIdForUpdate(saldoId)
                 .orElseThrow(() -> new IllegalArgumentException("Saldo local não encontrado."));
         if (estoqueMinimo != null && estoqueMinimo.signum() < 0) {
@@ -50,6 +54,7 @@ public class SaldoLocalService {
 
     @Transactional
     public LocalEstoque cadastrarLocal(String nome, String endereco) {
+        if (reservaV2 != null) reservaV2.lock();
         if (nome == null || nome.isBlank()) {
             throw new IllegalArgumentException("Nome do depósito é obrigatório.");
         }
@@ -65,6 +70,7 @@ public class SaldoLocalService {
 
     @Transactional
     public void sincronizarSaldoInicial(Material material) {
+        if (reservaV2 != null) reservaV2.lock();
         if (saldoRepository.existsByMaterialId(material.getId())) {
             return;
         }
@@ -80,6 +86,7 @@ public class SaldoLocalService {
 
     @Transactional
     public void sincronizarReservas(Material material) {
+        if (reservaV2 != null) reservaV2.lock();
         Material bloqueado = bloquearMaterial(material);
         List<SaldoMaterialLocal> saldos = saldoRepository.findByMaterialIdForUpdate(bloqueado.getId());
         BigDecimal restante = controlaMetragem(bloqueado)
@@ -91,18 +98,26 @@ public class SaldoLocalService {
             throw new SaldoInsuficienteException(
                     "Saldo dos depósitos insuficiente para a reserva de " + bloqueado.getNome() + ".");
         }
-        // A OS reserva no total geral; o espelho local segue a capacidade e a ordem dos depositos.
+        BigDecimal identificada = saldos.stream().map(s -> reservaV2 == null ? BigDecimal.ZERO : reservaV2.fixa(bloqueado.getId(), s.getLocalEstoque().getId())).reduce(BigDecimal.ZERO, BigDecimal::add);
+        restante = restante.subtract(identificada);
+        if (restante.signum() < 0) throw new SaldoInsuficienteException("Reserva identificada excede reserva global.");
         for (SaldoMaterialLocal saldo : saldos) {
-            BigDecimal reservado = saldoValor(bloqueado, saldo).min(restante);
+            BigDecimal fixa = reservaV2 == null ? BigDecimal.ZERO : reservaV2.fixa(bloqueado.getId(), saldo.getLocalEstoque().getId());
+            BigDecimal capacidade = saldoValor(bloqueado, saldo).subtract(fixa);
+            if (capacidade.signum() < 0) throw new SaldoInsuficienteException("Depósito contém reserva de OR V2; operação invadiria a separação identificada.");
+            BigDecimal parcela = capacidade.min(restante);
+            BigDecimal reservado = fixa.add(parcela);
             saldo.setQuantidadeReservada(controlaMetragem(bloqueado) ? 0 : reservado.intValueExact());
             saldo.setMetragemReservada(controlaMetragem(bloqueado) ? reservado : BigDecimal.ZERO);
             saldoRepository.save(saldo);
-            restante = restante.subtract(reservado);
+            restante = restante.subtract(parcela);
         }
+        if (restante.signum() != 0) throw new SaldoInsuficienteException("Saldo local não cobre reservas.");
     }
 
     @Transactional
     public LocalEstoque creditar(Material material, Long localId, BigDecimal valorCredito) {
+        if (reservaV2 != null) reservaV2.lock();
         material = bloquearMaterial(material);
         LocalEstoque local = localId != null ? buscarLocal(localId) : resolverOuCriar(material.getLocalizacao());
         SaldoMaterialLocal saldo = obterOuCriar(material, local);
@@ -114,11 +129,13 @@ public class SaldoLocalService {
 
     @Transactional
     public LocalEstoque creditarPadrao(Material material, BigDecimal valorCredito) {
+        if (reservaV2 != null) reservaV2.lock();
         return creditar(material, null, valorCredito);
     }
 
     @Transactional
     public LocalEstoque debitar(Material material, Long localId, BigDecimal valorDebito) {
+        if (reservaV2 != null) reservaV2.lock();
         material = bloquearMaterial(material);
         if (localId == null) {
             throw new IllegalArgumentException("Depósito do ajuste é obrigatório.");
@@ -139,6 +156,7 @@ public class SaldoLocalService {
 
     @Transactional
     public List<MovimentoLocal> debitarDistribuido(Material material, BigDecimal valorDebito) {
+        if (reservaV2 != null) reservaV2.lock();
         Material materialBloqueado = bloquearMaterial(material);
         List<SaldoMaterialLocal> saldos = new ArrayList<>(
                 saldoRepository.findByMaterialIdForUpdate(materialBloqueado.getId()));
@@ -150,12 +168,12 @@ public class SaldoLocalService {
             if (restante.signum() == 0) {
                 break;
             }
-            BigDecimal disponivel = saldoValor(materialBloqueado, saldo);
+            BigDecimal disponivel = saldoValor(materialBloqueado, saldo).subtract(reservaV2 == null ? BigDecimal.ZERO : reservaV2.fixa(materialBloqueado.getId(), saldo.getLocalEstoque().getId()));
             BigDecimal debitado = disponivel.min(restante);
             if (debitado.signum() <= 0) {
                 continue;
             }
-            atualizarSaldo(saldo, disponivel.subtract(debitado));
+            atualizarSaldo(saldo, saldoValor(materialBloqueado, saldo).subtract(debitado));
             saldoRepository.save(saldo);
             movimentos.add(new MovimentoLocal(saldo.getLocalEstoque(), debitado));
             restante = restante.subtract(debitado);
@@ -169,6 +187,7 @@ public class SaldoLocalService {
 
     @Transactional
     public TransferenciaLocal transferir(Material material, Long origemId, Long destinoId, BigDecimal valorTransferido) {
+        if (reservaV2 != null) reservaV2.lock();
         material = bloquearMaterial(material);
         if (origemId == null || destinoId == null || origemId.equals(destinoId)) {
             throw new IllegalArgumentException("Informe depósitos de origem e destino diferentes.");

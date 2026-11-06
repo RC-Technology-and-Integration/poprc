@@ -63,14 +63,14 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed,
   const { usuario, configuracao, logout } = useAuth();
   const navigate = useNavigate();
   const [estoqueExpandido, setEstoqueExpandido] = useState(false);
-  const secoesEstoque = [['materiais', 'Materiais e saldos', 'Mat.'], ['retiradas', 'Retiradas', 'Ret.'], ['pendencias', 'Pendências documentais', 'Doc.'], ['historico', 'Histórico', 'Hist.'], ['integracao', 'Planilhas e integração', 'Plan.']];
+  const secoesEstoque = [['materiais', 'Materiais e saldos', 'Mat.'], ['retiradas', 'Retiradas', 'Ret.'], ['pendencias', 'Pendências documentais', 'Doc.'], ['historico', 'Histórico', 'Hist.'], ['integracao', 'Planilhas e integração', 'Plan.']].filter(([path]) => usuario?.perfil !== 'SUPERVISOR_TECNICO' || path === 'pendencias');
   const handleLogout = async () => {
     await logout();
     navigate("/login", { replace: true });
   };
 
   const secoesVisiveis = secoesMenu
-    .map((secao) => ({ ...secao, itens: secao.itens.filter((item) => temPermissao(usuario?.perfil, item.permissao)) }))
+    .map((secao) => ({ ...secao, itens: secao.itens.filter((item) => temPermissao(usuario?.perfil, item.permissao) || (item.path === '/estoque' && usuario?.perfil === 'SUPERVISOR_TECNICO')) }))
     .filter((secao) => secao.itens.length > 0);
 
   return (
@@ -125,7 +125,7 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed,
                 {secao.itens.map((item) => (
                   <li key={item.path}>
                     {item.path === "/estoque" ? <>
-                      <button type="button" aria-label="Estoque" title="Estoque — abrir Materiais e saldos" className="estoque-menu-pai" aria-expanded={estoque || estoqueExpandido} aria-controls="estoque-submenu" onClick={() => { setEstoqueExpandido(true); if (collapsed) onToggleCollapsed(); navigate('/estoque/materiais'); }}><Package size={17} /><span>Estoque</span><span aria-hidden="true">⌄</span></button>
+                      <button type="button" aria-label="Estoque" title={usuario?.perfil === "SUPERVISOR_TECNICO" ? "Estoque — abrir Pendências documentais" : "Estoque — abrir Materiais e saldos"} className="estoque-menu-pai" aria-expanded={estoque || estoqueExpandido} aria-controls="estoque-submenu" onClick={() => { setEstoqueExpandido(true); if (collapsed) onToggleCollapsed(); navigate(usuario?.perfil === 'SUPERVISOR_TECNICO' ? '/estoque/pendencias' : '/estoque/materiais'); }}><Package size={17} /><span>Estoque</span><span aria-hidden="true">⌄</span></button>
                       {(estoque || estoqueExpandido) && <ul id="estoque-submenu" className="estoque-submenu" aria-label="Seções do estoque">{secoesEstoque.map(([path, label, abreviado]) => <li key={path}><NavLink to={`/estoque/${path}`} aria-label={label} title={label} onClick={onClose}><span className="estoque-menu-label">{label}</span><span className="estoque-menu-abreviado" aria-hidden="true">{abreviado}</span></NavLink></li>)}</ul>}
                     </> : (
                     <NavLink

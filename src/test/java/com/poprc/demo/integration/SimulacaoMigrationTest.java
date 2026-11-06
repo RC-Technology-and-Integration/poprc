@@ -25,7 +25,7 @@ class SimulacaoMigrationTest {
                     sql.execute("INSERT INTO documentos_internos (tipo, status, conteudo_json, hash_registro, assinatura_tecnico_base64, pdf_hash, pdf_path) VALUES ('ENCERRAMENTO_OS','REGISTRADO','{\"texto\":\"TESTE LEGADO\"}','hash-legado-preservado','TESTE-ASSINATURA-LEGADA','hash-pdf-legado','TESTE/pdf-legado.pdf')");
                 }
                 assertEquals(1, Flyway.configure().dataSource(migrationUrl, user, password)
-                        .locations("classpath:db/migration").load().migrate().migrationsExecuted, "A base V39 deve receber somente V40");
+                        .locations("classpath:db/migration").target("40").load().migrate().migrationsExecuted, "A base V39 deve receber somente V40");
                 try (var sql = connection.createStatement(); var rows = sql.executeQuery("SELECT simulacao, conteudo_json, hash_registro, assinatura_tecnico_base64, pdf_hash, pdf_path FROM documentos_internos")) {
                     assertTrue(rows.next()); assertFalse(rows.getBoolean(1));
                     assertEquals("{\"texto\":\"TESTE LEGADO\"}", rows.getString(2));

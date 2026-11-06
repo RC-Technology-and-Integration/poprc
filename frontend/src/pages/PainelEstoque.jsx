@@ -1,3 +1,6 @@
+import { lazy, Suspense } from "react";
+import { Link } from "react-router-dom";
+const RetiradasV2 = lazy(() => import("../components/RetiradasV2"));
 import "./catalogoEstoque.css";
 import "./estoqueDesign.css";
 import { CHAVE_VISUAL_CATALOGO, lerPreferenciasCatalogo, indexarSaldosPorMaterial, paginarCatalogo } from "../utils/catalogoEstoque";
@@ -413,11 +416,14 @@ export default function PainelEstoque({ secao = 'materiais' }) {
     fetchData();
   }, []);
 
-  const fetchData = async () => {
+  const fetchData = async (silencioso = false) => {
+    const emSegundoPlano = silencioso === true;
     const consultar = (url, necessario) => necessario ? api.get(url) : Promise.resolve({ data: [] });
     try {
-      setLoading(true);
-      setErroCarregamento(null);
+      if (!emSegundoPlano) {
+        setLoading(true);
+        setErroCarregamento(null);
+      }
       const [materiaisResponse, removidosResponse] = await Promise.all([
         consultar("/estoque/materiais", materiaisAtivos || retiradasAtivas || historicoAtivo || integracaoAtiva),
         podeGerenciarEstoque
@@ -441,7 +447,7 @@ export default function PainelEstoque({ secao = 'materiais' }) {
       setHistorico(historicoResponse.data);
 
       const ordensRetiradaResponse = await consultar("/ordens-retirada", retiradasAtivas || historicoAtivo || integracaoAtiva);
-      setOrdensRetirada(ordensRetiradaResponse.data || []);
+      setOrdensRetirada((ordensRetiradaResponse.data || []).filter(o => !o.novoFluxo));
 
       const unidadesResponse = await consultar("/estoque/unidades-rastreaveis", materiaisAtivos || retiradasAtivas);
       setUnidadesRastreaveis(unidadesResponse.data || []);
@@ -471,10 +477,11 @@ export default function PainelEstoque({ secao = 'materiais' }) {
 
       setError(null);
     } catch (err) {
-      setErroCarregamento(getApiErrorMessage(err, "Erro ao carregar dados do estoque."));
+      if (emSegundoPlano) setError(getApiErrorMessage(err, "Não foi possível atualizar os saldos. Atualize os dados antes de preparar outra retirada."));
+      else setErroCarregamento(getApiErrorMessage(err, "Erro ao carregar dados do estoque."));
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!emSegundoPlano) setLoading(false);
     }
   };
 
@@ -2963,14 +2970,16 @@ export default function PainelEstoque({ secao = 'materiais' }) {
               {tituloSecao}
             </h1>
             <p className="text-slate-600 mt-2">
-              {{materiais:'Visibilidade do estoque, do depósito à entrega.', retiradas:'Execução, devolução e documentos das ordens existentes.', pendencias:'Disponibilidade do fluxo de conferência documental.', historico:'Movimentações, consumo e rastreabilidade.', integracao:'Leitura assistida, prévias e importações existentes.'}[secao]}
+              {{materiais:'Visibilidade do estoque, do depósito à entrega.', retiradas:'Execução, devolução e documentos das ordens existentes.', pendencias:'Comprovantes assinados, revisão e prazos documentais.', historico:'Movimentações, consumo e rastreabilidade.', integracao:'Leitura assistida, prévias e importações existentes.'}[secao]}
             </p>
           </div>
           <div className="estoque-heading-acoes">
+            {materiaisAtivos && <Link className="estoque-primary" to="/estoque/retiradas?nova=1">Nova retirada</Link>}
             {materiaisAtivos && <button type="button" className="estoque-secondary" onClick={abrirModalNovoMaterial}><FolderPlus size={17} /> Novo material</button>}
-            {retiradasAtivas && <button type="button" className="estoque-primary" onClick={abrirPrimeiraOrPendente}><ArrowUpRight size={18} /> Executar OR</button>}
+            {retiradasAtivas && <button type="button" className="estoque-secondary" onClick={abrirPrimeiraOrPendente}><ArrowUpRight size={18} /> Executar OR legada</button>}
           </div>
         </div>
+        {['retiradas','pendencias','historico'].includes(secao) && <Suspense fallback={<p role="status">Carregando fluxo de retiradas…</p>}><RetiradasV2 secao={secao} materiais={materiais} locais={locaisEstoque} saldos={saldosLocais} comarcas={comarcas} aoMudar={() => fetchData(true)} /></Suspense>}
         {secao !== 'pendencias' && (        <details className="estoque-ferramentas">
           <summary>Ações da seção</summary>
           <div className="estoque-acoes">
@@ -4386,7 +4395,7 @@ export default function PainelEstoque({ secao = 'materiais' }) {
       </div>
 
       </>)}
-      {secao === 'pendencias' && <section className="estoque-catalogo"><p className="estoque-eyebrow">INDISPONÍVEL NO FLUXO ATUAL</p><h2>Conferência documental posterior à retirada</h2><p>O backend atual exige assinaturas para executar a OR. Não existe uma fila independente de comprovantes posteriores. Esta seção não apresenta contagens ou aprovações simuladas.</p><p>Documentos já emitidos e execução/devolução continuam disponíveis em Retiradas. A separação entre entrega física e documentação exige implementação futura de regras e persistência.</p></section>}
+
       {integracaoAtiva && <section className="estoque-catalogo"><h2>Planilhas e integração</h2><p>Use Ações da seção para os leitores, prévias e histórico de importações já existentes. Nenhuma integração automática com a V2 está disponível.</p><p>Importações e sincronização manual preservam as validações atuais. Não há status de sincronização automática nem sucesso simulado.</p><button className="estoque-secondary" onClick={() => setShowHistoricoImportacoesModal(true)}>Consultar importações e reconciliações</button></section>}
       {showSimulacaoModal && (
       <Modal isOpen={showSimulacaoModal} onClose={handleCloseModal} title="Simular retirada">

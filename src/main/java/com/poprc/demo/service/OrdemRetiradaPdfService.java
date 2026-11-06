@@ -73,6 +73,7 @@ public class OrdemRetiradaPdfService {
         if (ordem == null || ordem.getId() == null) {
             throw new IllegalArgumentException("OR persistida é obrigatória para arquivar o documento.");
         }
+        if (ordem.isNovoFluxo()) throw new IllegalArgumentException("Documentos V2 são imutáveis e acessados por arquivo/versionamento próprios.");
         validarFase(fase);
         return documentoRepository.findByOrdemRetiradaIdAndFase(ordem.getId(), fase)
                 .orElseGet(() -> criarArquivo(ordem, fase));
@@ -82,6 +83,7 @@ public class OrdemRetiradaPdfService {
     public byte[] obterPdfArquivado(Long ordemRetiradaId) {
         OrdemRetirada ordem = ordemRetiradaRepository.findById(ordemRetiradaId)
                 .orElseThrow(() -> new IllegalArgumentException("Ordem de retirada não encontrada."));
+        if (ordem.isNovoFluxo()) throw new IllegalArgumentException("Use a emissão versionada desta OR V2.");
         OrdemRetiradaDocumento documento = documentoRepository
                 .findFirstByOrdemRetiradaIdOrderByGeradoEmDescIdDesc(ordemRetiradaId)
                 .orElseGet(() -> arquivar(ordem, faseAtual(ordem)));

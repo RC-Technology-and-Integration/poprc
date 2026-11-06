@@ -1,5 +1,7 @@
 package com.poprc.demo.controller;
 
+import com.poprc.demo.service.EsperaEstoqueExcedidaException;
+
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -15,6 +17,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    @ExceptionHandler(EsperaEstoqueExcedidaException.class)
+    public ResponseEntity<Map<String, Object>> tratarEstoqueOcupado(EsperaEstoqueExcedidaException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "status", 503, "codigo", "ESTOQUE_OCUPADO", "erro", exception.getMessage()));
+    }
 
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<Map<String, Object>> tratarCredenciaisInvalidas(BadCredentialsException exception) {

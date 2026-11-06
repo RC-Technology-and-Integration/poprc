@@ -63,6 +63,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class ImportacaoEstoquePlanilhaService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
 
     private static final BigDecimal METROS_POR_BOBINA_CABO = new BigDecimal("305");
 
@@ -86,6 +89,7 @@ public class ImportacaoEstoquePlanilhaService {
     @Transactional
     public ImportacaoEstoquePlanilhaResultadoDTO importar(
             ImportacaoEstoquePlanilhaRequest request, String usuario) {
+        if (reservaV2 != null) reservaV2.lock();
         validarRequest(request);
         validarConteudoCompleto(request);
         String hash = request.hashSha256().trim().toLowerCase(Locale.ROOT);
@@ -295,6 +299,7 @@ public class ImportacaoEstoquePlanilhaService {
     @Transactional
     public ImportacaoEstoquePlanilhaResultadoDTO atualizarCustos(
             AtualizacaoCustosPlanilhaRequest request, String usuario) {
+        if (reservaV2 != null) reservaV2.lock();
         validarAtualizacaoCustos(request);
         String hash = request.hashSha256().trim().toLowerCase(Locale.ROOT);
         if (importacaoRepository.existsByHashSha256(hash)) {
@@ -399,6 +404,7 @@ public class ImportacaoEstoquePlanilhaService {
     @Transactional
     public ImportacaoEstoquePlanilhaResultadoDTO sincronizarSaldos(
             SincronizacaoSaldosPlanilhaRequest request, String usuario) {
+        if (reservaV2 != null) reservaV2.lock();
         validarSincronizacaoSaldos(request);
         String hash = hashModo("SALDOS", request.hashSha256());
         if (importacaoRepository.existsByHashSha256(hash)) {

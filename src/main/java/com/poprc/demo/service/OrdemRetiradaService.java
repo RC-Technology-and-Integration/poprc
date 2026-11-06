@@ -42,6 +42,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class OrdemRetiradaService implements OrdemRetiradaPort {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ReservaRetiradaV2Guard reservaV2;
+
 
     private static final String STATUS_GERADA = "GERADA";
     private static final String STATUS_RETIRADA = "RETIRADA";
@@ -64,6 +67,9 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
 
     @Transactional
     public OrdemRetirada criarParaOrdemServico(OrdemServico ordemServico, Comarca comarca, String geradoPor) {
+        if (reservaV2 != null) reservaV2.lock();
+        if (reservaV2 != null && ordemServico != null && ordemServico.getId() != null && reservaV2.possuiRegime(ordemServico.getId()))
+            throw new IllegalArgumentException("OS já usa OR V2; complementos devem usar o mesmo regime.");
         if (ordemServico == null || ordemServico.getId() == null) {
             throw new IllegalArgumentException("OS é obrigatória para gerar a OR.");
         }
@@ -107,6 +113,7 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
 
     @Transactional
     public OrdemRetirada criarAdicionalParaOs(Long ordemServicoId, String geradoPor) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemServico ordemServico = ordemServicoRepository.findByIdForUpdate(ordemServicoId)
                 .orElseThrow(() -> new IllegalArgumentException("OS não encontrada."));
         if (Boolean.TRUE.equals(ordemServico.getArquivado())) {
@@ -142,7 +149,9 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
 
     @Transactional
     public OrdemRetirada executarRetirada(Long id, ExecutarOrdemRetiradaRequest request) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemRetirada ordemRetirada = buscar(id);
+        if (ordemRetirada.isNovoFluxo()) throw new IllegalArgumentException("Use as operações do novo fluxo para esta OR.");
         simulacaoDocumentoService.exigirHabilitada(ordemRetirada.isSimulacao());
         if (!STATUS_GERADA.equals(ordemRetirada.getStatus())) {
             throw new IllegalArgumentException("Esta OR não está disponível para retirada.");
@@ -243,7 +252,9 @@ public class OrdemRetiradaService implements OrdemRetiradaPort {
 
     @Transactional
     public OrdemRetirada devolver(Long id, DevolverOrdemRetiradaRequest request) {
+        if (reservaV2 != null) reservaV2.lock();
         OrdemRetirada ordemRetirada = buscar(id);
+        if (ordemRetirada.isNovoFluxo()) throw new IllegalArgumentException("Use as operações do novo fluxo para esta OR.");
         simulacaoDocumentoService.exigirHabilitada(ordemRetirada.isSimulacao());
         if (!STATUS_RETIRADA.equals(ordemRetirada.getStatus())) {
             throw new IllegalArgumentException("A OR precisa estar retirada para registrar devolução.");
