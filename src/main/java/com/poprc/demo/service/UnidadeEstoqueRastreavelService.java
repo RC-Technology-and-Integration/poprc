@@ -45,6 +45,7 @@ public class UnidadeEstoqueRastreavelService {
         if (metragemInicial == null || metragemInicial.signum() <= 0) {
             throw new IllegalArgumentException("A metragem inicial deve ser maior que zero.");
         }
+        PrecisaoEstoque.metragem(metragemInicial, "A metragem inicial");
         if (unidadeRepository.existsByCodigoIgnoreCase(codigo.trim())) {
             throw new IllegalArgumentException("Já existe uma bobina/rolo com este código.");
         }
@@ -55,6 +56,9 @@ public class UnidadeEstoqueRastreavelService {
             throw new IllegalArgumentException("O material deve usar controle por bobina ou rolo.");
         }
 
+        BigDecimal saldoAnterior = valor(material.getMetragemDisponivel());
+        BigDecimal saldoPosterior = saldoAnterior.add(metragemInicial);
+        PrecisaoEstoque.metragem(saldoPosterior, "O saldo resultante");
         UnidadeEstoqueRastreavel unidade = new UnidadeEstoqueRastreavel();
         unidade.setCodigo(codigo.trim());
         unidade.setMaterial(material);
@@ -67,8 +71,7 @@ public class UnidadeEstoqueRastreavelService {
         unidade.setObservacao(observacao);
         UnidadeEstoqueRastreavel salva = unidadeRepository.save(unidade);
 
-        BigDecimal saldoAnterior = valor(material.getMetragemDisponivel());
-        material.setMetragemDisponivel(saldoAnterior.add(metragemInicial));
+        material.setMetragemDisponivel(saldoPosterior);
         materialRepository.save(material);
 
         MovimentacaoEstoque movimentacao = new MovimentacaoEstoque();

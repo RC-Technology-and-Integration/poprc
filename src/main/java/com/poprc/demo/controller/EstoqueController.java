@@ -13,6 +13,7 @@ import com.poprc.demo.model.Material;
 import com.poprc.demo.model.MovimentacaoEstoque;
 import com.poprc.demo.repository.MaterialRepository;
 import com.poprc.demo.repository.MovimentacaoEstoqueRepository; //  IMPORT DO REPOSITORY NOVO
+import com.poprc.demo.service.EstoqueIntencaoService;
 import com.poprc.demo.service.EstoqueService;
 import com.poprc.demo.service.UnidadeEstoqueRastreavelService;
 import com.poprc.demo.model.UnidadeEstoqueRastreavel;
@@ -37,8 +38,11 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.function.Supplier;
 import java.math.BigDecimal;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
 @RestController
 @RequestMapping("/api/estoque")
@@ -53,6 +57,25 @@ public class EstoqueController {
     private final ImportacaoEstoquePlanilhaService importacaoPlanilhaService;
     private final ImportacaoNotaFiscalEstoqueService importacaoNotaFiscalService;
     private final ReconciliacaoRetiradaPlanilhaService reconciliacaoRetiradaPlanilhaService;
+
+    private final EstoqueIntencaoService estoqueIntencaoService;
+
+    private ResponseEntity<?> registrarIntencao(String chave, Long funcionarioEsperado, UsuarioAutenticado ator, String operacao,
+            Object pedido, HttpStatus status, Supplier<?> registrar) {
+        if (chave == null) {
+            return ResponseEntity.status(status).body(registrar.get());
+        }
+        if (ator == null || ator.getFuncionarioId() == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("erro", "Sessão autenticada obrigatória."));
+        }
+        if (funcionarioEsperado != null && !funcionarioEsperado.equals(ator.getFuncionarioId())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("erro", "A sessão atual pertence a outro funcionário."));
+        }
+        String resultado = estoqueIntencaoService.executar(ator.getFuncionarioId(), UUID.fromString(chave),
+                operacao, pedido, registrar);
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON).body(resultado);
+    }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> tratarRequisicaoInvalida(IllegalArgumentException exception) {
@@ -109,15 +132,14 @@ public class EstoqueController {
     }
 
     @PostMapping("/entrada")
-    public ResponseEntity<MovimentacaoEstoque> registrarEntrada(@RequestBody EntradaRequest request) {
-        MovimentacaoEstoque movimentacao = estoqueService.registrarEntrada(
-                request.getMaterialId(),
-                request.getQuantidade(),
-                request.getMetragem(),
-                request.getCustoUnitarioEntrada(),
-                request.getFuncionarioId(),
-                request.getLocalEstoqueId());
-        return ResponseEntity.status(HttpStatus.CREATED).body(movimentacao);
+    public ResponseEntity<?> registrarEntrada(@RequestBody EntradaRequest request,
+            @RequestHeader(name = EstoqueIntencaoService.HEADER, required = false) String chave,
+            @RequestHeader(name = "X-Estoque-Funcionario", required = false) Long funcionarioEsperado,
+            @AuthenticationPrincipal UsuarioAutenticado ator) {
+        return registrarIntencao(chave, funcionarioEsperado, ator, "entrada", request, HttpStatus.CREATED,
+                () -> estoqueService.registrarEntrada(request.getMaterialId(), request.getQuantidade(),
+                        request.getMetragem(), request.getCustoUnitarioEntrada(), request.getFuncionarioId(),
+                        request.getLocalEstoqueId()));
     }
 
     @PostMapping("/saida")
@@ -131,17 +153,25 @@ public class EstoqueController {
     }
 
     @PostMapping("/ajustes")
-    public ResponseEntity<MovimentacaoEstoque> registrarAjuste(@RequestBody AjusteRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(estoqueService.registrarAjuste(
-                request.getMaterialId(), request.getLocalEstoqueId(), request.getValor(), request.getTipo(), request.getMotivo(),
-                request.getLancadoPor(), request.getAutorizadoPor()));
+    public ResponseEntity<?> registrarAjuste(@RequestBody AjusteRequest request,
+            @RequestHeader(name = EstoqueIntencaoService.HEADER, required = false) String chave,
+            @RequestHeader(name = "X-Estoque-Funcionario", required = false) Long funcionarioEsperado,
+            @AuthenticationPrincipal UsuarioAutenticado ator) {
+        return registrarIntencao(chave, funcionarioEsperado, ator, "ajuste", request, HttpStatus.CREATED,
+                () -> estoqueService.registrarAjuste(request.getMaterialId(), request.getLocalEstoqueId(),
+                        request.getValor(), request.getTipo(), request.getMotivo(), request.getLancadoPor(),
+                        request.getAutorizadoPor()));
     }
 
     @PostMapping("/transferencias")
-    public ResponseEntity<MovimentacaoEstoque> transferir(@RequestBody TransferenciaRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(estoqueService.transferirLocalizacao(
-                request.getMaterialId(), request.getOrigemId(), request.getDestinoId(), request.getValor(), request.getMotivo(),
-                request.getLancadoPor(), request.getAutorizadoPor()));
+    public ResponseEntity<?> transferir(@RequestBody TransferenciaRequest request,
+            @RequestHeader(name = EstoqueIntencaoService.HEADER, required = false) String chave,
+            @RequestHeader(name = "X-Estoque-Funcionario", required = false) Long funcionarioEsperado,
+            @AuthenticationPrincipal UsuarioAutenticado ator) {
+        return registrarIntencao(chave, funcionarioEsperado, ator, "transferencia", request, HttpStatus.CREATED,
+                () -> estoqueService.transferirLocalizacao(request.getMaterialId(), request.getOrigemId(),
+                        request.getDestinoId(), request.getValor(), request.getMotivo(), request.getLancadoPor(),
+                        request.getAutorizadoPor()));
     }
 
     @GetMapping("/locais")
@@ -299,18 +329,24 @@ public class EstoqueController {
     }
 
     @PostMapping("/unidades-rastreaveis")
-    public ResponseEntity<UnidadeEstoqueRastreavel> cadastrarUnidadeRastreavel(
-            @RequestBody UnidadeRastreavelRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(unidadeRastreavelService.cadastrar(
-                request.getMaterialId(), request.getCodigo(), request.getMetragemInicial(), request.getObservacao(),
-                request.getLocalEstoqueId()));
+    public ResponseEntity<?> cadastrarUnidadeRastreavel(@RequestBody UnidadeRastreavelRequest request,
+            @RequestHeader(name = EstoqueIntencaoService.HEADER, required = false) String chave,
+            @RequestHeader(name = "X-Estoque-Funcionario", required = false) Long funcionarioEsperado,
+            @AuthenticationPrincipal UsuarioAutenticado ator) {
+        return registrarIntencao(chave, funcionarioEsperado, ator, "entrada-unidade", request, HttpStatus.CREATED,
+                () -> unidadeRastreavelService.cadastrar(request.getMaterialId(), request.getCodigo(),
+                        request.getMetragemInicial(), request.getObservacao(), request.getLocalEstoqueId()));
     }
 
     @PatchMapping("/unidades-rastreaveis/{id}/transferir")
-    public ResponseEntity<UnidadeEstoqueRastreavel> transferirUnidadeRastreavel(
-            @PathVariable Long id, @RequestBody TransferenciaUnidadeRequest request) {
-        return ResponseEntity.ok(unidadeRastreavelService.transferir(
-                id, request.getDestinoId(), request.getMotivo(), request.getLancadoPor(), request.getAutorizadoPor()));
+    public ResponseEntity<?> transferirUnidadeRastreavel(
+            @PathVariable Long id, @RequestBody TransferenciaUnidadeRequest request,
+            @RequestHeader(name = EstoqueIntencaoService.HEADER, required = false) String chave,
+            @RequestHeader(name = "X-Estoque-Funcionario", required = false) Long funcionarioEsperado,
+            @AuthenticationPrincipal UsuarioAutenticado ator) {
+        return registrarIntencao(chave, funcionarioEsperado, ator, "transferencia-unidade:" + id, request, HttpStatus.OK,
+                () -> unidadeRastreavelService.transferir(id, request.getDestinoId(), request.getMotivo(),
+                        request.getLancadoPor(), request.getAutorizadoPor()));
     }
 
     // POST-only contract. Lifecycle fields remain compatible inputs but never become client-owned state.
