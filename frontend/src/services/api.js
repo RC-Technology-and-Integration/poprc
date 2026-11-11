@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { CanceledError } from 'axios'
 import { API_BASE_URL } from './runtimeConfig'
 
 const api = axios.create({
@@ -8,13 +8,31 @@ const api = axios.create({
 })
 
 let reauthHandler = null
+let revisaoSessao = 0
+
+export const revisaoAtualSessao = () => revisaoSessao
+export const exigirSessaoAtual = (revisao) => {
+  if (revisao !== revisaoSessao) throw new CanceledError('A sessão mudou.')
+}
+export const invalidarSessao = () => {
+  delete api.defaults.headers.common['X-XSRF-TOKEN']
+  return ++revisaoSessao
+}
+
+api.interceptors.request.use(config => {
+  config.__revisaoSessao ??= revisaoSessao
+  exigirSessaoAtual(config.__revisaoSessao)
+  return config
+}, error => { throw error }, { synchronous: true })
 
 export const setReauthHandler = (handler) => {
   reauthHandler = handler
 }
 
 export const refreshCsrfToken = async () => {
-  const response = await api.get('/auth/csrf', { __csrfRefresh: true })
+  const revisao = revisaoSessao
+  const response = await api.get('/auth/csrf')
+  exigirSessaoAtual(revisao)
   const token = response.data?.token
   if (token) api.defaults.headers.common['X-XSRF-TOKEN'] = token
   return token
@@ -43,9 +61,15 @@ export const getApiErrorMessage = (error, fallback = 'Não foi possível conclui
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // A autenticação pode ter alterado o cookie mesmo se a revisão mudou.
+    // Seu chamador confirma a identidade com um novo GET depois da transição.
+    if (!response.config.__transicaoSessao) exigirSessaoAtual(response.config.__revisaoSessao)
+    return response
+  },
   async (error) => {
     const config = error.config
+    if (config && !config.__transicaoSessao) exigirSessaoAtual(config.__revisaoSessao)
     const responseData = error.response?.data
     const responseMessage = typeof responseData === 'string'
       ? responseData
@@ -60,6 +84,7 @@ api.interceptors.response.use(
     ) {
       config.__reauthRetry = true
       const token = await reauthHandler()
+      exigirSessaoAtual(config.__revisaoSessao)
       if (token && config.headers) {
         config.headers['X-XSRF-TOKEN'] = token
       }
@@ -71,6 +96,7 @@ api.interceptors.response.use(
       config.__csrfRetry = true
       try {
         const token = await refreshCsrfToken()
+        exigirSessaoAtual(config.__revisaoSessao)
         if (token && config.headers) {
           config.headers['X-XSRF-TOKEN'] = token
         }
@@ -79,10 +105,12 @@ api.interceptors.response.use(
         // A sessão pode ter expirado de fato; o fluxo abaixo encerra o acesso local.
       }
     }
+    if (config && !config.__transicaoSessao) exigirSessaoAtual(config.__revisaoSessao)
     const endpointAutenticacao = ['/auth/me', '/auth/login', '/auth/reauth']
       .some((endpoint) => error.config?.url?.includes(endpoint))
     const logoutIntencional = sessionStorage.getItem('auth:logout') === '1'
     if ((error.response?.status === 401 || sessaoExpirada)
+      && !config?.__transicaoSessao
       && !endpointAutenticacao
       && !logoutIntencional) {
       sessionStorage.setItem('auth:reason', 'sessao')

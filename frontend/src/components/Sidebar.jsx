@@ -65,7 +65,11 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapsed,
   const [estoqueExpandido, setEstoqueExpandido] = useState(false);
   const secoesEstoque = [['materiais', 'Materiais e saldos', 'Mat.'], ['retiradas', 'Retiradas', 'Ret.'], ['pendencias', 'Pendências documentais', 'Doc.'], ['historico', 'Histórico', 'Hist.'], ['integracao', 'Planilhas e integração', 'Plan.']].filter(([path]) => usuario?.perfil !== 'SUPERVISOR_TECNICO' || path === 'pendencias');
   const handleLogout = async () => {
-    await logout();
+    try {
+      await logout();
+    } catch {
+      return; // O provedor mostra o motivo e a sessão atual permanece acessível.
+    }
     navigate("/login", { replace: true });
   };
 
