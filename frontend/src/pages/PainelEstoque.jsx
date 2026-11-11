@@ -1,3 +1,5 @@
+import { API_ORIGIN } from "../services/runtimeConfig";
+import { listarIntencoes, prefixoIntencoes, recuperarIntencao, resumirIntencao, salvarIntencao } from "../utils/intencoesEstoque";
 import { lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
 const RetiradasV2 = lazy(() => import("../components/RetiradasV2"));
@@ -29,7 +31,7 @@ import {
   Undo2,
   Calculator,
 } from "lucide-react";
-import api, { getApiErrorMessage } from "../services/api";
+import api, { exigirSessaoAtual, revisaoAtualSessao, getApiErrorMessage } from "../services/api";
 import Modal from "../components/Modal";
 import LoadingSpinner from "../components/LoadingSpinner";
 import Alert from "../components/Alert";
@@ -251,7 +253,7 @@ export default function PainelEstoque({ secao = 'materiais' }) {
   const historicoAtivo = secao === 'historico';
   const integracaoAtiva = secao === 'integracao';
   const tituloSecao = { materiais: 'Materiais e saldos', retiradas: 'Retiradas', pendencias: 'Pendências documentais', historico: 'Histórico', integracao: 'Planilhas e integração' }[secao];
-  const { usuario } = useAuth();
+  const { usuario, revisaoSessao, recarregar } = useAuth();
   const podeGerenciarEstoque = ["ADMIN", "ESTOQUE"].includes(usuario?.perfil);
   const [materiais, setMateriais] = useState([]);
   const [materiaisRemovidos, setMateriaisRemovidos] = useState([]);
@@ -295,6 +297,39 @@ export default function PainelEstoque({ secao = 'materiais' }) {
   const [estoqueValorMaximo, setEstoqueValorMaximo] = useState("");
   const [estoqueFaltaMinima, setEstoqueFaltaMinima] = useState("");
   const [estoqueOrdenacao, setEstoqueOrdenacao] = useState("NOME_ASC");
+
+  const funcionarioEstoque = usuario?.funcionarioId;
+  const ambienteEstoque = JSON.stringify([window.location.origin, API_ORIGIN]);
+  const escopoIntencoes = podeGerenciarEstoque && funcionarioEstoque
+    ? prefixoIntencoes(ambienteEstoque, funcionarioEstoque) : null;
+  const [confirmacaoRetomada, setConfirmacaoRetomada] = useState(null);
+  const [recuperacaoEstoque, setRecuperacaoEstoque] = useState(null);
+  const pendenciasEstoque = recuperacaoEstoque?.escopo === escopoIntencoes ? recuperacaoEstoque.itens : [];
+  const avisoRecuperacao = recuperacaoEstoque?.escopo === escopoIntencoes ? recuperacaoEstoque.aviso : null;
+  const atualizarIntencoes = () => {
+    if (!escopoIntencoes) return;
+    try {
+      const { itens, corrompida } = listarIntencoes(localStorage, ambienteEstoque, funcionarioEstoque);
+      setRecuperacaoEstoque({ escopo: escopoIntencoes, itens,
+        aviso: corrompida ? "Há envios salvos inválidos. Eles continuam guardados e não podem ser retomados. Confira o histórico antes de registrar outro lançamento." : null });
+    } catch {
+      setRecuperacaoEstoque({ escopo: escopoIntencoes, itens: [],
+        aviso: "Armazenamento do navegador indisponível para recuperar envios." });
+    }
+  };
+
+  useEffect(() => {
+    atualizarIntencoes();
+    const atualizarOutraAba = (event) => {
+      if (!event.key || event.key.startsWith(escopoIntencoes ?? "poprc:estoque:intencao:")) atualizarIntencoes();
+    };
+    window.addEventListener("storage", atualizarOutraAba);
+    return () => window.removeEventListener("storage", atualizarOutraAba);
+  }, [escopoIntencoes]);
+
+  const intencaoEstoque = useRef(null);
+  const [enviandoOperacaoEstoque, setEnviandoOperacaoEstoque] = useState(false);
+  const [erroOperacaoEstoque, setErroOperacaoEstoque] = useState(null);
 
   // Modais de controle
   const [showEntradaModal, setShowEntradaModal] = useState(false);
@@ -417,8 +452,14 @@ export default function PainelEstoque({ secao = 'materiais' }) {
   }, []);
 
   const fetchData = async (silencioso = false) => {
+    if (revisaoSessao !== revisaoAtualSessao()) return;
     const emSegundoPlano = silencioso === true;
-    const consultar = (url, necessario) => necessario ? api.get(url) : Promise.resolve({ data: [] });
+    const consultar = async (url, necessario) => {
+      exigirSessaoAtual(revisaoSessao);
+      const resposta = necessario ? await api.get(url) : { data: [] };
+      exigirSessaoAtual(revisaoSessao);
+      return resposta;
+    };
     try {
       if (!emSegundoPlano) {
         setLoading(true);
@@ -477,15 +518,18 @@ export default function PainelEstoque({ secao = 'materiais' }) {
 
       setError(null);
     } catch (err) {
+      if (revisaoSessao !== revisaoAtualSessao()) return;
       if (emSegundoPlano) setError(getApiErrorMessage(err, "Não foi possível atualizar os saldos. Atualize os dados antes de preparar outra retirada."));
       else setErroCarregamento(getApiErrorMessage(err, "Erro ao carregar dados do estoque."));
       console.error(err);
     } finally {
-      if (!emSegundoPlano) setLoading(false);
+      if (!emSegundoPlano && revisaoSessao === revisaoAtualSessao()) setLoading(false);
     }
   };
 
   const handleCloseModal = () => {
+    if (intencaoEstoque.current?.enviando) return;
+    setErroOperacaoEstoque(null);
     setShowEntradaModal(false);
     setShowSaidaModal(false);
     setShowNovoMaterialModal(false);
@@ -1785,35 +1829,95 @@ export default function PainelEstoque({ secao = 'materiais' }) {
     }
   };
 
-  const handleSubmitEntrada = async (e) => {
-    e.preventDefault();
+  const executarIntencaoEstoque = async (item, mensagem, erroPadrao, fecharModal = false) => {
+    if (revisaoSessao !== revisaoAtualSessao()) return;
+    intencaoEstoque.current = { enviando: true };
+    setEnviandoOperacaoEstoque(true);
+    setErroOperacaoEstoque(null);
     try {
-      const entradaDecimal = ["FRACIONADO", "METRAGEM"].includes(materialEntradaSelecionado?.tipoControle);
-      await api.post("/estoque/entrada", {
-        materialId: parseInt(formData.materialId),
-        quantidade:
-          entradaDecimal
-            ? null
-            : parseInt(formData.quantidade, 10),
-        metragem:
-          entradaDecimal
-            ? parseFloat(formData.quantidade)
-            : null,
-        custoUnitarioEntrada:
-          formData.custoUnitarioEntrada === ""
-            ? null
-            : parseFloat(formData.custoUnitarioEntrada),
-        funcionarioId: parseInt(formData.funcionarioId),
-        localEstoqueId: Number(formData.localEstoqueId),
+      const { data: sessao } = await api.get("/auth/me");
+      exigirSessaoAtual(revisaoSessao);
+      if (sessao?.funcionarioId !== item.funcionario || !["ADMIN", "ESTOQUE"].includes(sessao.perfil) ||
+          sessao.trocaSenhaObrigatoria) {
+        recarregar().catch(() => {});
+        return;
+      }
+      const resposta = await api.request({
+        method: item.method, url: item.url, data: item.corpo,
+        headers: { "Content-Type": "application/json", "Idempotency-Key": item.chave,
+          "X-Estoque-Funcionario": String(item.funcionario) },
       });
-      setSuccessMessage("Entrada de material registrada com sucesso!");
-      setTimeout(() => setSuccessMessage(null), 4000);
-      handleCloseModal();
-      fetchData();
+      exigirSessaoAtual(revisaoSessao);
+      if (resposta.status !== (item.method === "patch" ? 200 : 201) ||
+          !Number.isSafeInteger(resposta.data?.id) || resposta.data.id <= 0) {
+        throw new Error("O servidor não confirmou o resultado do envio.");
+      }
+      localStorage.removeItem(prefixoIntencoes(item.ambiente, item.funcionario) + item.chave);
     } catch (err) {
-      setError(getApiErrorMessage(err, "Erro ao registrar entrada."));
-      console.error(err);
+      if (revisaoSessao !== revisaoAtualSessao()) return;
+      const detalhe = getApiErrorMessage(err, erroPadrao);
+      const aviso = err.response?.status === 409
+        ? "Conflito no envio. A intenção anterior continua salva."
+        : "O envio continua salvo. A retomada pode efetivar o lançamento se o servidor ainda não o concluiu.";
+      setErroOperacaoEstoque(`${detalhe} ${aviso}`);
+      return;
+    } finally {
+      intencaoEstoque.current = null;
+      if (revisaoSessao === revisaoAtualSessao()) {
+        setEnviandoOperacaoEstoque(false);
+        atualizarIntencoes();
+      }
     }
+    setSuccessMessage(mensagem);
+    if (fecharModal) handleCloseModal();
+    fetchData();
+  };
+
+  const enviarOperacaoEstoque = async (method, url, data, mensagem, erroPadrao) => {
+    if (intencaoEstoque.current?.enviando || !escopoIntencoes || revisaoSessao !== revisaoAtualSessao()) return;
+    let item;
+    try {
+      item = salvarIntencao(localStorage, ambienteEstoque, funcionarioEstoque, method, url, data);
+    } catch {
+      setErroOperacaoEstoque("Não foi possível salvar a intenção. O envio não foi iniciado.");
+      return;
+    }
+    return executarIntencaoEstoque(item, mensagem, erroPadrao, true);
+  };
+
+  const retomarIntencaoEstoque = (item) => {
+    if (intencaoEstoque.current?.enviando || !escopoIntencoes || revisaoSessao !== revisaoAtualSessao()) return;
+    setConfirmacaoRetomada(item);
+  };
+
+  const confirmarRetomadaEstoque = async () => {
+    if (!confirmacaoRetomada || intencaoEstoque.current?.enviando || !escopoIntencoes ||
+        revisaoSessao !== revisaoAtualSessao()) return;
+    setConfirmacaoRetomada(null);
+    let item;
+    try {
+      item = recuperarIntencao(localStorage, ambienteEstoque, funcionarioEstoque, confirmacaoRetomada.chave);
+      if (item.method !== confirmacaoRetomada.method || item.url !== confirmacaoRetomada.url ||
+          item.corpo !== confirmacaoRetomada.corpo) throw new Error("A intenção mudou.");
+    } catch {
+      atualizarIntencoes();
+      setErroOperacaoEstoque("O envio salvo mudou ou ficou indisponível. Confira as pendências antes de tentar novamente.");
+      return;
+    }
+    return executarIntencaoEstoque(item, "Envio anterior confirmado.", "Não foi possível retomar o envio.");
+  };
+
+  const handleSubmitEntrada = (e) => {
+    e.preventDefault();
+    const entradaDecimal = ["FRACIONADO", "METRAGEM"].includes(materialEntradaSelecionado?.tipoControle);
+    return enviarOperacaoEstoque("post", "/estoque/entrada", {
+      materialId: parseInt(formData.materialId),
+      quantidade: entradaDecimal ? null : parseInt(formData.quantidade, 10),
+      metragem: entradaDecimal ? parseFloat(formData.quantidade) : null,
+      custoUnitarioEntrada: formData.custoUnitarioEntrada === "" ? null : parseFloat(formData.custoUnitarioEntrada),
+      funcionarioId: parseInt(formData.funcionarioId),
+      localEstoqueId: Number(formData.localEstoqueId),
+    }, "Entrada de material registrada com sucesso!", "Erro ao registrar entrada.");
   };
 
   const abrirModalOr = (ordemRetirada, acao) => {
@@ -2169,22 +2273,15 @@ export default function PainelEstoque({ secao = 'materiais' }) {
     }));
   };
 
-  const cadastrarUnidadeRastreavel = async (event) => {
+  const cadastrarUnidadeRastreavel = (event) => {
     event.preventDefault();
-    try {
-      await api.post("/estoque/unidades-rastreaveis", {
-        materialId: Number(unidadeForm.materialId),
-        codigo: unidadeForm.codigo,
-        metragemInicial: parseFloat(unidadeForm.metragemInicial),
-        observacao: unidadeForm.observacao,
-        localEstoqueId: Number(unidadeForm.localEstoqueId),
-      });
-      setSuccessMessage("Bobina/rolo cadastrado com sucesso!");
-      handleCloseModal();
-      fetchData();
-    } catch (err) {
-      setError(getApiErrorMessage(err, "Erro ao cadastrar bobina/rolo."));
-    }
+    return enviarOperacaoEstoque("post", "/estoque/unidades-rastreaveis", {
+      materialId: Number(unidadeForm.materialId),
+      codigo: unidadeForm.codigo,
+      metragemInicial: parseFloat(unidadeForm.metragemInicial),
+      observacao: unidadeForm.observacao,
+      localEstoqueId: Number(unidadeForm.localEstoqueId),
+    }, "Bobina/rolo cadastrado com sucesso!", "Erro ao cadastrar bobina/rolo.");
   };
 
   const abrirAjuste = (material) => {
@@ -2215,44 +2312,30 @@ export default function PainelEstoque({ secao = 'materiais' }) {
     setShowTransferenciaModal(true);
   };
 
-  const registrarAjuste = async (event) => {
+  const registrarAjuste = (event) => {
     event.preventDefault();
-    try {
-      await api.post("/estoque/ajustes", {
-        materialId: materialOperacao.id,
-        localEstoqueId: Number(ajusteForm.localEstoqueId),
-        tipo: ajusteForm.tipo,
-        valor: parseFloat(ajusteForm.valor),
-        motivo: ajusteForm.motivo,
-        lancadoPor: ajusteForm.lancadoPor,
-        autorizadoPor: ajusteForm.autorizadoPor,
-      });
-      setSuccessMessage("Ajuste registrado no livro de movimentações.");
-      handleCloseModal();
-      fetchData();
-    } catch (err) {
-      setError(getApiErrorMessage(err, "Erro ao registrar ajuste."));
-    }
+    return enviarOperacaoEstoque("post", "/estoque/ajustes", {
+      materialId: materialOperacao.id,
+      localEstoqueId: Number(ajusteForm.localEstoqueId),
+      tipo: ajusteForm.tipo,
+      valor: parseFloat(ajusteForm.valor),
+      motivo: ajusteForm.motivo,
+      lancadoPor: ajusteForm.lancadoPor,
+      autorizadoPor: ajusteForm.autorizadoPor,
+    }, "Ajuste registrado no livro de movimentações.", "Erro ao registrar ajuste.");
   };
 
-  const registrarTransferencia = async (event) => {
+  const registrarTransferencia = (event) => {
     event.preventDefault();
-    try {
-      await api.post("/estoque/transferencias", {
-        materialId: materialOperacao.id,
-        origemId: Number(transferenciaForm.origemId),
-        destinoId: Number(transferenciaForm.destinoId),
-        valor: parseFloat(transferenciaForm.valor),
-        motivo: transferenciaForm.motivo,
-        lancadoPor: transferenciaForm.lancadoPor,
-        autorizadoPor: transferenciaForm.autorizadoPor,
-      });
-      setSuccessMessage("Transferência registrada no livro de movimentações.");
-      handleCloseModal();
-      fetchData();
-    } catch (err) {
-      setError(getApiErrorMessage(err, "Erro ao transferir material."));
-    }
+    return enviarOperacaoEstoque("post", "/estoque/transferencias", {
+      materialId: materialOperacao.id,
+      origemId: Number(transferenciaForm.origemId),
+      destinoId: Number(transferenciaForm.destinoId),
+      valor: parseFloat(transferenciaForm.valor),
+      motivo: transferenciaForm.motivo,
+      lancadoPor: transferenciaForm.lancadoPor,
+      autorizadoPor: transferenciaForm.autorizadoPor,
+    }, "Transferência registrada no livro de movimentações.", "Erro ao transferir material.");
   };
 
   const cadastrarLocalEstoque = async (event) => {
@@ -2273,21 +2356,14 @@ export default function PainelEstoque({ secao = 'materiais' }) {
     setShowTransferenciaUnidadeModal(true);
   };
 
-  const transferirUnidadeRastreavel = async (event) => {
+  const transferirUnidadeRastreavel = (event) => {
     event.preventDefault();
-    try {
-      await api.patch(`/estoque/unidades-rastreaveis/${unidadeOperacao.id}/transferir`, {
-        destinoId: Number(transferenciaUnidadeForm.destinoId),
-        motivo: transferenciaUnidadeForm.motivo,
-        lancadoPor: transferenciaUnidadeForm.lancadoPor,
-        autorizadoPor: transferenciaUnidadeForm.autorizadoPor,
-      });
-      setSuccessMessage("Bobina/rolo transferido com rastreabilidade completa.");
-      handleCloseModal();
-      fetchData();
-    } catch (err) {
-      setError(getApiErrorMessage(err, "Erro ao transferir bobina/rolo."));
-    }
+    return enviarOperacaoEstoque("patch", `/estoque/unidades-rastreaveis/${unidadeOperacao.id}/transferir`, {
+      destinoId: Number(transferenciaUnidadeForm.destinoId),
+      motivo: transferenciaUnidadeForm.motivo,
+      lancadoPor: transferenciaUnidadeForm.lancadoPor,
+      autorizadoPor: transferenciaUnidadeForm.autorizadoPor,
+    }, "Bobina/rolo transferido com rastreabilidade completa.", "Erro ao transferir bobina/rolo.");
   };
   const materialEntradaSelecionado = materiais.find(
     (material) => String(material.id) === String(formData.materialId),
@@ -2961,6 +3037,29 @@ export default function PainelEstoque({ secao = 'materiais' }) {
 
   return (
     <div className="estoque-responsive estoque-design w-full min-w-0">
+      {escopoIntencoes && (pendenciasEstoque.length > 0 || avisoRecuperacao) && (
+        <section aria-label="Envios de estoque pendentes" className="mb-4 rounded-lg border p-4">
+          <h2 className="font-semibold">Envios de estoque pendentes</h2>
+          {avisoRecuperacao && <Alert type="error" message={avisoRecuperacao} />}
+          {erroOperacaoEstoque && <Alert type="error" message={erroOperacaoEstoque} />}
+          {pendenciasEstoque.map(item => (
+            <div key={item.chave} className="flex flex-wrap items-center justify-between gap-2 py-2">
+              <span>{resumirIntencao(item, materiais, locaisEstoque)}</span>
+              <button type="button" className="estoque-secondary" disabled={enviandoOperacaoEstoque}
+                onClick={() => retomarIntencaoEstoque(item)}>Retomar envio anterior</button>
+            </div>
+          ))}
+          <p>Para registrar outro lançamento, abra o formulário correspondente e escolha Nova operação.</p>
+        </section>
+      )}
+      {escopoIntencoes && confirmacaoRetomada && (
+        <Modal isOpen onClose={() => setConfirmacaoRetomada(null)} title="Confirmar retomada de estoque">
+          <p>{resumirIntencao(confirmacaoRetomada, materiais, locaisEstoque)}</p>
+          <p className="my-4">Se o servidor já concluiu este envio, você recuperará o resultado original.
+            Se ainda não concluiu, retomar pode efetivar o lançamento.</p>
+          <button type="button" className="estoque-primary" onClick={confirmarRetomadaEstoque}>Confirmar retomada</button>
+        </Modal>
+      )}
       {/* Header */}
       <div>
         <div className="estoque-heading">
@@ -4676,9 +4775,10 @@ export default function PainelEstoque({ secao = 'materiais' }) {
               placeholder="Autorizado por"
             />
           </div>
+          {erroOperacaoEstoque && <Alert type="error" message={erroOperacaoEstoque} />}
           <div className="flex justify-end gap-3 pt-3">
             <button type="button" onClick={handleCloseModal} className="rounded-lg border px-5 py-2">Cancelar</button>
-            <button type="submit" className="rounded-lg bg-cyan-700 px-5 py-2 font-bold text-white">Transferir unidade</button>
+            <button type="submit" disabled={enviandoOperacaoEstoque} className="rounded-lg bg-cyan-700 px-5 py-2 font-bold text-white">{pendenciasEstoque.length ? "Nova operação" : "Transferir unidade"}</button>
           </div>
         </form>
       </Modal>
@@ -4760,9 +4860,10 @@ export default function PainelEstoque({ secao = 'materiais' }) {
               placeholder="Autorizado por"
             />
           </div>
+          {erroOperacaoEstoque && <Alert type="error" message={erroOperacaoEstoque} />}
           <div className="flex justify-end gap-3 pt-3">
             <button type="button" onClick={handleCloseModal} className="rounded-lg border px-5 py-2">Cancelar</button>
-            <button type="submit" className="rounded-lg bg-slate-800 px-5 py-2 font-bold text-white">Registrar ajuste</button>
+            <button type="submit" disabled={enviandoOperacaoEstoque} className="rounded-lg bg-slate-800 px-5 py-2 font-bold text-white">{pendenciasEstoque.length ? "Nova operação" : "Registrar ajuste"}</button>
           </div>
         </form>
       </Modal>
@@ -4837,9 +4938,10 @@ export default function PainelEstoque({ secao = 'materiais' }) {
               placeholder="Autorizado por"
             />
           </div>
+          {erroOperacaoEstoque && <Alert type="error" message={erroOperacaoEstoque} />}
           <div className="flex justify-end gap-3 pt-3">
             <button type="button" onClick={handleCloseModal} className="rounded-lg border px-5 py-2">Cancelar</button>
-            <button type="submit" className="rounded-lg bg-cyan-700 px-5 py-2 font-bold text-white">Transferir</button>
+            <button type="submit" disabled={enviandoOperacaoEstoque} className="rounded-lg bg-cyan-700 px-5 py-2 font-bold text-white">{pendenciasEstoque.length ? "Nova operação" : "Transferir"}</button>
           </div>
         </form>
       </Modal>
@@ -6621,6 +6723,7 @@ export default function PainelEstoque({ secao = 'materiais' }) {
               ))}
             </select>
           </div>
+          {erroOperacaoEstoque && <Alert type="error" message={erroOperacaoEstoque} />}
           <div className="flex gap-3 justify-end pt-4">
             <button
               type="button"
@@ -6630,10 +6733,10 @@ export default function PainelEstoque({ secao = 'materiais' }) {
               Cancelar
             </button>
             <button
-              type="submit"
+              type="submit" disabled={enviandoOperacaoEstoque}
               className="px-6 py-2 bg-green-600 text-white font-semibold rounded-lg"
             >
-              Registrar Entrada
+              {pendenciasEstoque.length ? "Nova operação" : "Registrar Entrada"}
             </button>
           </div>
         </form>
@@ -6721,12 +6824,13 @@ export default function PainelEstoque({ secao = 'materiais' }) {
               className="w-full resize-none rounded-lg border border-slate-300 px-4 py-2"
             />
           </div>
+          {erroOperacaoEstoque && <Alert type="error" message={erroOperacaoEstoque} />}
           <div className="flex justify-end gap-3 pt-3">
             <button type="button" onClick={handleCloseModal} className="rounded-lg border px-5 py-2">
               Cancelar
             </button>
-            <button type="submit" className="rounded-lg bg-cyan-700 px-5 py-2 font-bold text-white">
-              Cadastrar
+            <button type="submit" disabled={enviandoOperacaoEstoque} className="rounded-lg bg-cyan-700 px-5 py-2 font-bold text-white">
+              {pendenciasEstoque.length ? "Nova operação" : "Cadastrar"}
             </button>
           </div>
         </form>

@@ -14,7 +14,7 @@ class RetiradaV2MigrationTest {
   String prefix=base.substring(0,base.lastIndexOf('/')+1);String sufixo=UUID.randomUUID().toString().replace("-","").substring(0,10);
   String fresh="r2_fresh_"+sufixo+"_test",legacy="r2_legacy_"+sufixo+"_test";
   try(var c=DriverManager.getConnection(base,user,senha);var st=c.createStatement()){st.execute("create database "+fresh);st.execute("create database "+legacy);}
-  var vazio=Flyway.configure().dataSource(prefix+fresh,user,senha).locations("classpath:db/migration").load();assertThat(vazio.migrate().migrationsExecuted).isEqualTo(42);
+  var vazio=Flyway.configure().dataSource(prefix+fresh,user,senha).locations("classpath:db/migration").load();assertThat(vazio.migrate().migrationsExecuted).isEqualTo(43);
   Flyway.configure().dataSource(prefix+legacy,user,senha).locations("classpath:db/migration").target("40").load().migrate();
   try(var c=DriverManager.getConnection(prefix+legacy,user,senha);var st=c.createStatement()){
    for(String status:List.of("GERADA","RETIRADA","DEVOLVIDA")){
@@ -37,7 +37,7 @@ class RetiradaV2MigrationTest {
    st.execute("insert into ordens_retirada(numero_or,status) values('TESTE-HASH-LEGADO','RASCUNHO_V2')");st.execute("insert into retirada_v2_operacoes(escopo,chave,hash,or_id,resultado) select '1:ANEXAR','11111111-1111-4111-8111-111111111111',repeat('a',64),id,'{\"id\":1}' from ordens_retirada where numero_or='TESTE-HASH-LEGADO'");
    try(var r=st.executeQuery("select row(escopo,chave,hash,or_id,resultado)::text from retirada_v2_operacoes")){r.next();antes=r.getString(1);}
   }
-  assertThat(Flyway.configure().dataSource(url,user,senha).locations("classpath:db/migration").load().migrate().migrationsExecuted).isEqualTo(1);
+  assertThat(Flyway.configure().dataSource(url,user,senha).locations("classpath:db/migration").load().migrate().migrationsExecuted).isEqualTo(2);
   try(var c=DriverManager.getConnection(url,user,senha);var st=c.createStatement();var r=st.executeQuery("select row(escopo,chave,hash,or_id,resultado)::text,algoritmo from retirada_v2_operacoes")){r.next();assertThat(r.getString(1)).isEqualTo(antes);assertThat(r.getString(2)).isEqualTo("JSON_V1");}
   System.out.println("F02_V41_V42_PRESERVADO="+url);
  }

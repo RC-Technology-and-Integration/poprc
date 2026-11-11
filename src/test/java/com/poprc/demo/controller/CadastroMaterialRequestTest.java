@@ -70,7 +70,7 @@ class CadastroMaterialRequestTest {
     void estadoIndevidoERejeitadoAntesDeInvocarServico(String field) {
         var request = mapper.readValue("{" + field + "}", EstoqueController.CadastroMaterialRequest.class);
         var service = mock(EstoqueService.class);
-        var controller = new EstoqueController(service, null, null, null, null, null, null, null);
+        var controller = new EstoqueController(service, null, null, null, null, null, null, null, null);
         assertThrows(IllegalArgumentException.class, () -> controller.cadastrarNovoMaterial(request));
         verifyNoInteractions(service);
     }
@@ -90,7 +90,7 @@ class CadastroMaterialRequestTest {
         var request = mapper.readValue(json, EstoqueController.CadastroMaterialRequest.class);
         var service = mock(EstoqueService.class);
         when(service.cadastrarMaterial(any(Material.class))).thenAnswer(call -> call.getArgument(0));
-        var controller = new EstoqueController(service, null, null, null, null, null, null, null);
+        var controller = new EstoqueController(service, null, null, null, null, null, null, null, null);
         var response = controller.cadastrarNovoMaterial(request);
         var recebido = ArgumentCaptor.forClass(Material.class);
         verify(service).cadastrarMaterial(recebido.capture());

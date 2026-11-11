@@ -1,8 +1,9 @@
+import { Fragment } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth, homePorPerfil } from "../contexts/AuthContext";
 
 export default function ProtectedRoute({ children, roles }) {
-  const { usuario, carregando, configuracao } = useAuth();
+  const { usuario, carregando, configuracao, revisaoSessao } = useAuth();
   const location = useLocation();
 
   if (carregando) {
@@ -19,5 +20,5 @@ export default function ProtectedRoute({ children, roles }) {
   if (roles && !roles.includes(usuario.perfil)) {
     return <Navigate to={homePorPerfil(usuario.perfil)} replace state={{ acessoNegado: true }} />;
   }
-  return children;
+  return <Fragment key={revisaoSessao}>{children}</Fragment>;
 }

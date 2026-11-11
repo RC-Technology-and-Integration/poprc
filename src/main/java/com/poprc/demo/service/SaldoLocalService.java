@@ -201,10 +201,15 @@ public class SaldoLocalService {
         if (valorTransferido.signum() <= 0 || valorTransferido.compareTo(disponivel) > 0) {
             throw new IllegalArgumentException("Valor de transferência inválido. Disponível na origem: " + disponivel + ".");
         }
+        boolean decimal = controlaMetragem(material);
+        PrecisaoEstoque.saldo(valorTransferido, decimal, "O valor da transferência");
+        SaldoMaterialLocal saldoDestino = obterOuCriar(material, destino);
+        BigDecimal saldoDestinoResultante = saldoValor(material, saldoDestino).add(valorTransferido);
+        PrecisaoEstoque.saldo(saldoDestinoResultante, decimal, "O saldo de destino");
+
         atualizarSaldo(saldoOrigem, disponivel.subtract(valorTransferido));
         saldoRepository.save(saldoOrigem);
-        SaldoMaterialLocal saldoDestino = obterOuCriar(material, destino);
-        atualizarSaldo(saldoDestino, saldoValor(material, saldoDestino).add(valorTransferido));
+        atualizarSaldo(saldoDestino, saldoDestinoResultante);
         saldoRepository.save(saldoDestino);
         sincronizarReservas(material);
         return new TransferenciaLocal(origem, destino);

@@ -24,7 +24,11 @@ export default function UserMenu({ compacto = false }) {
   }, []);
 
   const sair = async (trocar = false) => {
-    await logout();
+    try {
+      await logout();
+    } catch {
+      return; // O provedor mostra o motivo e a sessão atual permanece acessível.
+    }
     navigate(trocar ? "/login?trocar=1" : "/login", { replace: true });
   };
 

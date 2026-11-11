@@ -82,7 +82,7 @@ jobs:
       - name: Validar scripts de implantacao
         run: bash -n deploy/scripts/*.sh
 
-      - name: Validar V1-V42, legado e somente V40 sobre V39 no PostgreSQL 16
+      - name: Validar V1-V43, legado e somente V40 sobre V39 no PostgreSQL 16
         run: ./mvnw --batch-mode -Dspring.config.import= -Dpoprc.pg16.migration=true -Dtest=Postgres16MigrationCiTest,SimulacaoMigrationTest test
 
       - name: Executar abertura em banco exclusivo com Java 25 e PostgreSQL 16
@@ -240,6 +240,23 @@ jobs:
           cd frontend
           npx playwright test
 
+      - name: Validar sessão, retomada e precisão do estoque no Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          for suite in sessao retomada residuais; do
+            output="target/estoque-e2e/$suite"
+            mkdir -p "$output"
+            git rev-parse HEAD > "$output/tested-sha.txt"
+            (CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable)" &&
+             export CHROME_BIN && "$CHROME_BIN" --version &&
+             python3 frontend/tests/estoque-e2e.py --suite "$suite" \
+              --jar target/demo-0.0.1-SNAPSHOT.jar --out "$output"
+            ) > "$output/runner.log" 2>&1 || status=1
+          done
+          exit "$status"
+
       - name: Guardar resultados e evidencias de teste
         if: always()
         uses: actions/upload-artifact@v7
@@ -253,6 +270,7 @@ jobs:
             target/jsoup-ci
             target/simulacao-pdf-review
             target/retiradas-v2-e2e
+            target/estoque-e2e
             target/f02-restart-*
             target/retiradas-v2-backend.log
             target/retiradas-v2-frontend.log

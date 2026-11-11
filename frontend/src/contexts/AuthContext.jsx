@@ -1,8 +1,24 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import api, { refreshCsrfToken, setReauthHandler } from "../services/api";
+import api, { exigirSessaoAtual, invalidarSessao, refreshCsrfToken, revisaoAtualSessao, setReauthHandler } from "../services/api";
 import { normalizarCpf } from "../utils/cpf";
 
 const AuthContext = createContext(null);
+const MUDANCA_SESSAO = "poprc:auth:session-change";
+const LOCK_SESSAO = "poprc:auth:transicao";
+
+async function comSessaoExclusiva(executar) {
+  let iniciou = false;
+  try {
+    return await navigator.locks.request(LOCK_SESSAO, { ifAvailable: true }, async lock => {
+      iniciou = true;
+      if (!lock) throw new Error("Outra aba está autenticando ou encerrando a sessão. Aguarde e tente novamente. Se ela ficou travada, feche ou recarregue aquela aba.");
+      return executar();
+    });
+  } catch (error) {
+    if (iniciou) throw error;
+    throw new Error("Este navegador não permite coordenar a sessão entre abas. Abra o sistema em um navegador compatível, em HTTPS ou localhost.");
+  }
+}
 
 export const homePorPerfil = (perfil) => {
   if (perfil === "TECNICO") return "/tecnico";
@@ -20,45 +36,153 @@ export function AuthProvider({ children }) {
   const [reauthProcessando, setReauthProcessando] = useState(false);
   const reauthPromise = useRef(null);
 
-  const carregarUsuario = async (configAtual = configuracao) => {
+  const [revisaoSessao, setRevisaoSessao] = useState(revisaoAtualSessao);
+  const canalSessao = useRef(null);
+  const transicoes = useRef(new Set());
+  const [avisoSessao, setAvisoSessao] = useState("");
+
+  const cancelarReautenticacao = () => {
+    reauthPromise.current?.reject(new Error("Reautenticação cancelada."));
+    reauthPromise.current = null;
+    setReauthAberta(false);
+    setReauthProcessando(false);
+  };
+
+  const suspenderIdentidade = () => {
+    const revisao = invalidarSessao();
+    setRevisaoSessao(revisao);
+    setUsuario(null);
+    setCarregando(true);
+    cancelarReautenticacao();
+    return revisao;
+  };
+
+  const carregarUsuario = async (revisao = suspenderIdentidade()) => {
     try {
-      const selecionarUsuario = new URLSearchParams(window.location.search).get("trocar") === "1";
-      if (!configAtual.securityEnabled && configAtual.devLoginEnabled && !selecionarUsuario) {
-        const usuarios = await api.get("/auth/dev-usuarios");
-        const administrador = usuarios.data.find((item) => item.perfil === "ADMIN") || usuarios.data[0];
-        if (!administrador) throw new Error("Nenhum usuário de teste ativo foi encontrado.");
-        const response = await api.post("/auth/dev-login", { funcionarioId: administrador.id });
-        await refreshCsrfToken();
-        setUsuario(response.data);
-        return;
-      }
-      await api.get("/auth/csrf");
-      const response = await api.get("/auth/me");
-      setUsuario(response.data);
+      const { data } = await api.get("/auth/me");
+      exigirSessaoAtual(revisao);
+      await refreshCsrfToken();
+      exigirSessaoAtual(revisao);
+      setUsuario(data);
+      return data;
     } catch (error) {
       if (error.response?.status !== 401) throw error;
-      setUsuario(null);
+      return null;
     } finally {
-      setCarregando(false);
+      if (revisao === revisaoAtualSessao()) setCarregando(false);
     }
   };
 
+  const comunicar = (id, fase) => {
+    if (canalSessao.current) {
+      canalSessao.current.postMessage({ id, fase });
+      return;
+    }
+    try {
+      localStorage.setItem(MUDANCA_SESSAO, JSON.stringify({ id, fase }));
+    } catch {
+      // A autorização no servidor vale também quando a notificação entre abas falha.
+    }
+  };
+
+  const mudarSessao = (rota, dados, renovarAntes = false) => comSessaoExclusiva(async () => {
+    const id = crypto.randomUUID();
+    transicoes.current.add(id);
+    suspenderIdentidade();
+    comunicar(id, "inicio");
+    let atual;
+    try {
+      if (renovarAntes) await refreshCsrfToken();
+      await api.post(rota, dados, { __transicaoSessao: true });
+    } finally {
+      transicoes.current.delete(id);
+      if (!transicoes.current.size) atual = await carregarUsuario().catch(() => null);
+      comunicar(id, "fim");
+    }
+    if (rota !== "/auth/logout" && !atual) throw new Error("Não foi possível confirmar a sessão.");
+    return atual;
+  });
+
   useEffect(() => {
-    api.get("/auth/config")
-      .then(async ({ data }) => { setConfiguracao(data); await carregarUsuario(data); })
-      .catch(() => setCarregando(false));
-    const expirarSessao = () => setUsuario(null);
+    const acompanhar = id => {
+      // A liberação também ocorre se a aba titular fechar antes de enviar "fim".
+      navigator.locks?.request(LOCK_SESSAO, { mode: "shared" }, async () => {
+        if (transicoes.current.delete(id) && !transicoes.current.size) {
+          await carregarUsuario().catch(() => {});
+        }
+      }).catch(() => {
+        // A falha da leitura do lock mantém a identidade suspensa até nova confirmação.
+        if (transicoes.current.delete(id) && !transicoes.current.size) setCarregando(false);
+      });
+    };
+    const sincronizar = (mensagem) => {
+      const { id, fase } = mensagem ?? {};
+      if (fase === "inicio" && typeof id === "string" && !transicoes.current.has(id)) {
+        transicoes.current.add(id);
+        suspenderIdentidade();
+        acompanhar(id);
+      } else if (fase === "fim" || fase === "atualizar") {
+        const pendente = transicoes.current.has(id);
+        // Com Web Locks, a aba observadora espera o fim efetivo da requisição.
+        if (pendente && navigator.locks) return;
+        transicoes.current.delete(id);
+        if (!transicoes.current.size) carregarUsuario().catch(() => {});
+      }
+    };
+    const canal = typeof BroadcastChannel === "function" ? new BroadcastChannel(MUDANCA_SESSAO) : null;
+    canalSessao.current = canal;
+    if (canal) canal.onmessage = ({ data }) => sincronizar(data);
+    const receberStorage = (event) => {
+      if (event.key !== MUDANCA_SESSAO) return;
+      try {
+        sincronizar(JSON.parse(event.newValue));
+      } catch {
+        sincronizar({ fase: "atualizar" });
+      }
+    };
+    const expirarSessao = () => {
+      suspenderIdentidade();
+      if (!transicoes.current.size) setCarregando(false);
+    };
+    const restaurarPagina = (event) => {
+      if (event.persisted && !transicoes.current.size) carregarUsuario().catch(() => {});
+    };
+    window.addEventListener("storage", receberStorage);
     window.addEventListener("auth:unauthorized", expirarSessao);
-    return () => window.removeEventListener("auth:unauthorized", expirarSessao);
+    window.addEventListener("pageshow", restaurarPagina);
+    const revisao = suspenderIdentidade();
+    api.get("/auth/config").then(async ({ data }) => {
+      exigirSessaoAtual(revisao);
+      setConfiguracao(data);
+      const trocar = new URLSearchParams(window.location.search).get("trocar") === "1";
+      if (!data.securityEnabled && data.devLoginEnabled && !trocar) {
+        const usuarios = (await api.get("/auth/dev-usuarios")).data;
+        exigirSessaoAtual(revisao);
+        const escolhido = usuarios.find(item => item.perfil === "ADMIN") || usuarios[0];
+        if (escolhido) return mudarSessao("/auth/dev-login", { funcionarioId: escolhido.id });
+      }
+      return carregarUsuario(revisao);
+    }).catch(() => {
+      if (revisao === revisaoAtualSessao()) setCarregando(false);
+    });
+    return () => {
+      invalidarSessao();
+      canal?.close();
+      canalSessao.current = null;
+      window.removeEventListener("storage", receberStorage);
+      window.removeEventListener("auth:unauthorized", expirarSessao);
+      window.removeEventListener("pageshow", restaurarPagina);
+    };
   }, []);
 
   useEffect(() => {
     setReauthHandler(() => {
+      if (transicoes.current.size) return Promise.reject(new Error("A sessão está em confirmação."));
       if (reauthPromise.current) return reauthPromise.current.promise;
       let resolve;
       let reject;
       const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
-      reauthPromise.current = { promise, resolve, reject };
+      reauthPromise.current = { promise, resolve, reject, revisao: revisaoAtualSessao() };
       setReauthErro("");
       setReauthAberta(true);
       return promise;
@@ -66,84 +190,71 @@ export function AuthProvider({ children }) {
     return () => setReauthHandler(null);
   }, []);
 
-  const login = async (cpf, senha) => {
-    const response = await api.post("/auth/login", { cpf: normalizarCpf(cpf), senha });
-    await refreshCsrfToken();
-    setUsuario(response.data);
-    return response.data;
-  };
-
-  const loginDesenvolvimento = async (funcionarioId) => {
-    const response = await api.post("/auth/dev-login", { funcionarioId });
-    await refreshCsrfToken();
-    setUsuario(response.data);
-    return response.data;
-  };
-
+  const login = (cpf, senha) => mudarSessao("/auth/login", { cpf: normalizarCpf(cpf), senha });
+  const loginDesenvolvimento = (funcionarioId) => mudarSessao("/auth/dev-login", { funcionarioId });
   const configurarAdministrador = async (dados) => {
-    await refreshCsrfToken();
-    const response = await api.post("/auth/bootstrap", {
-      ...dados,
-      cpf: normalizarCpf(dados.cpf),
-    });
-    await refreshCsrfToken();
-    setConfiguracao((atual) => ({ ...atual, bootstrapRequired: false }));
-    setUsuario(response.data);
-    return response.data;
+    const atual = await mudarSessao("/auth/bootstrap", dados, true);
+    setConfiguracao(estado => ({ ...estado, bootstrapRequired: false }));
+    return atual;
   };
-
   const logout = async () => {
+    setAvisoSessao("");
     sessionStorage.setItem("auth:logout", "1");
     try {
-      await refreshCsrfToken();
-      await api.post("/auth/logout");
-      setUsuario(null);
+      await mudarSessao("/auth/logout", undefined, true);
     } catch (error) {
       sessionStorage.removeItem("auth:logout");
+      setAvisoSessao(error.message || "Não foi possível sair. Tente novamente.");
       throw error;
     }
   };
-
   const alterarSenha = async (senhaAtual, novaSenha) => {
-    await refreshCsrfToken();
-    const response = await api.post("/auth/alterar-senha", { senhaAtual, novaSenha });
-    if (!response.data?.senhaConfigurada || response.data?.trocaSenhaObrigatoria) {
+    const atual = await mudarSessao("/auth/alterar-senha", { senhaAtual, novaSenha }, true);
+    if (!atual.senhaConfigurada || atual.trocaSenhaObrigatoria) {
       throw new Error("O servidor não confirmou a alteração da senha.");
     }
-    setUsuario(response.data);
-    return response.data;
+    return atual;
   };
 
   const confirmarReautenticacao = async (senha) => {
+    const pendente = reauthPromise.current;
+    if (!pendente) return;
     setReauthProcessando(true);
     setReauthErro("");
     try {
-      const token = await refreshCsrfToken();
-      await api.post("/auth/reauth", { senha });
-      reauthPromise.current?.resolve(token);
+      const token = await comSessaoExclusiva(async () => {
+        exigirSessaoAtual(pendente.revisao);
+        const csrf = await refreshCsrfToken();
+        exigirSessaoAtual(pendente.revisao);
+        await api.post("/auth/reauth", { senha });
+        return csrf;
+      });
+      if (reauthPromise.current !== pendente) return;
+      pendente.resolve(token);
       reauthPromise.current = null;
       setReauthAberta(false);
+      setReauthProcessando(false);
     } catch (error) {
-      setReauthErro(error.response?.data?.erro || "Senha inválida.");
-    } finally {
+      if (reauthPromise.current !== pendente) return;
+      setReauthErro(error.response?.data?.erro || error.message || "Senha inválida.");
       setReauthProcessando(false);
     }
   };
 
-  const cancelarReautenticacao = () => {
-    reauthPromise.current?.reject(new Error("Operação cancelada pelo usuário."));
-    reauthPromise.current = null;
-    setReauthAberta(false);
-  };
-
   const value = useMemo(
-    () => ({ usuario, carregando, configuracao, login, loginDesenvolvimento, configurarAdministrador, logout, alterarSenha, recarregar: carregarUsuario }),
-    [usuario, carregando, configuracao],
+    () => ({ usuario, carregando, configuracao, revisaoSessao, login, loginDesenvolvimento, configurarAdministrador, logout, alterarSenha, recarregar: carregarUsuario }),
+    [usuario, carregando, configuracao, revisaoSessao],
   );
 
   return (
     <AuthContext.Provider value={value}>
       {children}
+      {avisoSessao && (
+        <div role="alert" className="fixed inset-x-4 bottom-4 z-[90] rounded border bg-white p-4 text-slate-900 shadow-lg">
+          <p>{avisoSessao}</p>
+          <button type="button" onClick={() => setAvisoSessao("")}>Fechar aviso</button>
+        </div>
+      )}
       {reauthAberta && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true">
           <form

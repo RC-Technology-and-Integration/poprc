@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import React from 'react';
+import { salvarIntencao, prefixoIntencoes } from '../src/utils/intencoesEstoque.js';
 import { transformWithOxc } from 'vite';
 
 // Exercise the actual handler and input JSX, without a server, database or copied payload builder.
 const source = readFileSync(new URL('../src/pages/PainelEstoque.jsx', import.meta.url), 'utf8');
-const start = source.indexOf('  const handleSubmitEntrada = async (e) => {');
+const start = source.indexOf('  const executarIntencaoEstoque = async');
 const end = source.indexOf('\n  const abrirModalOr', start);
 assert.ok(start >= 0 && end > start);
 const handler = source.slice(start, end);
@@ -32,16 +33,30 @@ for (const [tipoControle, unidadeMedida, value, decimal] of [
       formData: { materialId: '1', quantidade: value, custoUnitarioEntrada: '1.2345', funcionarioId: '2', localEstoqueId: '3' },
       handleInputChange() {},
       unidadeMaterial: material => ({ UNIDADE: 'un', PACOTE: 'pacote', METRO: 'm', PECA: 'peça' })[material.unidadeMedida],
-      api: { post: async (...args) => calls.push(args) },
+      api: { get: async () => ({ data: { funcionarioId: 2, perfil: "ESTOQUE" } }), request: async config => { calls.push(config); return { status: 201, data: { id: 1 } }; } },
+      escopoIntencoes: "teste", ambienteEstoque: "teste", funcionarioEstoque: 2,
+      salvarIntencao, prefixoIntencoes, atualizarIntencoes() {},
+      revisaoSessao: 1, revisaoAtualSessao: () => 1, exigirSessaoAtual() {},
+      localStorage: {
+        setItem(key, value) { this[key] = value; },
+        getItem(key) { return this[key]; },
+        removeItem(key) { delete this[key]; },
+      },
       setSuccessMessage() {}, setTimeout() {}, handleCloseModal() {}, fetchData() {},
-      setError(error) { throw new Error(error); }, getApiErrorMessage: error => error.message,
+      intencaoEstoque: { current: null },
+      crypto: globalThis.crypto,
+      setEnviandoOperacaoEstoque() {},
+      setErroOperacaoEstoque(error) { if (error) throw new Error(error); },
+      getApiErrorMessage: error => error.message,
       console,
     };
     vm.createContext(context);
     await vm.runInContext(`${handler}\nhandleSubmitEntrada({preventDefault(){}})`, context);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0][0], '/estoque/entrada');
-    const payload = calls[0][1];
+    assert.equal(calls[0].url, '/estoque/entrada');
+    assert.equal(calls[0].method, 'post');
+    assert.match(calls[0].headers['Idempotency-Key'], /^[0-9a-f-]{36}$/);
+    const payload = JSON.parse(calls[0].data);
     assert.equal(payload.quantidade, decimal ? null : 2);
     assert.equal(payload.metragem, decimal ? 0.125 : null);
     assert.equal(payload.custoUnitarioEntrada, 1.2345);
