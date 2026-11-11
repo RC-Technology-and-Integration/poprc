@@ -171,6 +171,7 @@ try {
   });
   await login(fixture.outroCpf);
   await confirmar(controle).click();
+  await controle.getByRole('button', { name: 'Abrir menu de R02 OUTRO OPERADOR' }).waitFor();
   await aguardarEstoque(controle);
   assert.equal(mutacoes, 0);
   assert.equal(await pendente(controle).count(), 0);
