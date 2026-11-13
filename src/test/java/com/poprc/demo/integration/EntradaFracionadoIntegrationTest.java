@@ -217,8 +217,8 @@ class EntradaFracionadoIntegrationTest {
         assertEquals(0, count("movimentacoes_estoque")); assertEquals(0, count("importacoes_notas_fiscais"));
         assertEquals(0, count("importacoes_notas_fiscais_itens"));
         try (var files = Files.walk(uploads)) {
-            System.out.println("R01 NF rollback: sem gravacao parcial no banco; variacao de arquivos temporarios="
-                    + (files.filter(Files::isRegularFile).count() - arquivosAntes));
+            assertEquals(arquivosAntes, files.filter(Files::isRegularFile).count(),
+                    "Validação inválida não deve criar arquivo fiscal.");
         }
     }
 

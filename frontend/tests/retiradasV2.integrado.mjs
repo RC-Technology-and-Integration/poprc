@@ -86,8 +86,17 @@ try {
   await page.getByLabel('Justificativa / motivo').fill('Entrega parcial de ensaio: um item não entregue');
   await context.setOffline(true);await page.getByRole('button', { name: 'Confirmar quantidades efetivas e registrar baixa única' }).click();
   await page.getByText(/Intenção preservada/).waitFor();await context.setOffline(false);
-  await page.getByRole('button', { name: 'Consultar/repetir a mesma intenção' }).dblclick();relatorio.transporteInterrompidoSomenteNoCliente=true;
+  const entregasAntesRetry = rede.filter(r => r.metodo === 'POST' && r.url.endsWith(`/v2/${orId}/entrega`)).length;
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Consultar/repetir a mesma intenção' && !b.disabled));
+  // A primeira ação pode desabilitar/remover o botão; não esperar uma segunda ação Playwright nele.
+  await page.getByRole('button', { name: 'Consultar/repetir a mesma intenção' }).evaluate(b => {
+    if (b.disabled) throw new Error('Retry precisa estar habilitado antes das duas tentativas.');
+    b.click();b.click();
+  });relatorio.transporteInterrompidoSomenteNoCliente=true;
   await page.getByRole('button', { name: 'Anexar comprovante assinado', exact: true }).waitFor();
+  const postsRetry = rede.filter(r => r.metodo === 'POST' && r.url.endsWith(`/v2/${orId}/entrega`)).length - entregasAntesRetry;
+  assert.equal(postsRetry, 1, 'Duas tentativas rápidas devem enviar um único POST de entrega.');
+  relatorio.retryDuplo = { tentativas: 2, posts: postsRetry };
   const after = (await (await context.request.get('/api/estoque/materiais')).json()).find(m => m.id === fixture.materialId);
   assert.equal(after.quantidadeDisponivel, before.quantidadeDisponivel - 1);
   relatorio.baixaUnica = { antes: before.quantidadeDisponivel, depois: after.quantidadeDisponivel };

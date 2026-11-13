@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { diagnosticoSessao } from './estoqueDiagnostico.mjs';
 
 const baseURL = process.env.POP_RC_E2E_BASE_URL;
 assert.match(baseURL, /^http:\/\/127\.0\.0\.1:\d+$/);
@@ -92,6 +93,7 @@ async function concorrentes(fecharTitular) {
   const context = await browser.newContext({
     baseURL: 'http://127.0.0.1:' + proxy.address().port, viewport: { width: 1440, height: 1000 },
   });
+  const diagnostico = await diagnosticoSessao(context, fecharTitular ? 'titular-fechada' : 'login-concorrente');
   try {
     const a = await abrir(context);
     const b = await abrir(context);
@@ -132,8 +134,12 @@ async function concorrentes(fecharTitular) {
     registro(fecharTitular ? 'titular-fechada' : 'login-concorrente', {
       respostaDeAComSetCookie: true, postConcorrenteDeB: 0, postValidoDeB: postsB, identidade, ...entrega,
     });
+  } catch (error) {
+    await diagnostico.falha(error);
+    throw error;
   } finally {
     liberar.resolve();
+    await diagnostico.encerrar();
     await context.close();
     proxy.closeAllConnections();
     await new Promise(resolve => proxy.close(resolve));

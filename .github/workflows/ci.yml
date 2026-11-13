@@ -85,6 +85,13 @@ jobs:
       - name: Validar V1-V43, legado e somente V40 sobre V39 no PostgreSQL 16
         run: ./mvnw --batch-mode -Dspring.config.import= -Dpoprc.pg16.migration=true -Dtest=Postgres16MigrationCiTest,SimulacaoMigrationTest test
 
+      - name: Preservar XMLs do gate original de migrações
+        run: |
+          mkdir -p target/migrations-ci
+          cp target/surefire-reports/*Postgres16MigrationCiTest* target/migrations-ci/
+          cp target/surefire-reports/*SimulacaoMigrationTest* target/migrations-ci/
+          git rev-parse HEAD > target/migrations-ci/tested-sha.txt
+
       - name: Executar abertura em banco exclusivo com Java 25 e PostgreSQL 16
         run: |
           ./mvnw --batch-mode -Dspring.config.import= -Dtest=EnsaioAberturaEstoqueTest test
@@ -128,6 +135,68 @@ jobs:
 
       - name: Executar suite completa e empacotar backend
         run: ./mvnw --batch-mode -Dspring.config.import= verify
+
+      - name: Conferir testes fiscais e preservar verify da fonte final
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, shutil, subprocess
+          import xml.etree.ElementTree as ET
+          output = pathlib.Path('target/nf-ci')
+          output.mkdir()
+          full = pathlib.Path('target/verify-final')
+          full.mkdir()
+          totals = dict(tests=0, failures=0, errors=0, skipped=0)
+          skipped = []
+          for path in pathlib.Path('target/surefire-reports').glob('TEST-*.xml'):
+              report = ET.parse(path).getroot()
+              for key in totals:
+                  totals[key] += int(report.attrib[key])
+              skipped.extend({'suite': report.attrib['name'], 'test': case.attrib['name'],
+                              'reason': case.find('skipped').attrib.get('message', '')}
+                             for case in report.findall('testcase') if case.find('skipped') is not None)
+              shutil.copy2(path, full)
+          tests = {}
+          for name, count in {'storage.NotaFiscalArquivoStorageTest': 5,
+                              'storage.NotaFiscalInterrupcaoTest': 4,
+                              'integration.NotaFiscalAcessoEstaticoIntegrationTest': 1,
+                              'service.ImportacaoNotaFiscalEstoqueServiceTest': 7,
+                              'integration.EntradaFracionadoIntegrationTest': 9}.items():
+              path = pathlib.Path(f'target/surefire-reports/TEST-com.poprc.demo.{name}.xml')
+              report = ET.parse(path).getroot()
+              tests[name] = {key: int(report.attrib[key]) for key in totals}
+              assert tests[name] == dict(tests=count, failures=0, errors=0, skipped=0), tests
+              java = next(p.attrib['value'] for p in report.find('properties') if p.attrib['name'] == 'java.version')
+              assert java.split('.')[0] == '25', java
+              shutil.copy2(path, output)
+          jar = pathlib.Path('target/demo-0.0.1-SNAPSHOT.jar')
+          result = {'tested_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                    'pr_head': os.environ['PR_HEAD'], 'totals': totals, 'skipped': skipped, 'tests': tests,
+                    'jar_sha256': hashlib.sha256(jar.read_bytes()).hexdigest()}
+          (output / 'verification.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          PY
+
+      - name: Validar rollback e recuperação fiscal por HTTP real no JAR final
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TEST_DB_URL" = 'jdbc:postgresql://localhost:5432/poprc_test'
+          export NF_PGBIN="$(dirname "$(command -v psql)")"
+          export NF_PGPORT=5432
+          export NF_PGDATA="$(PGPASSWORD="$TEST_DB_PASSWORD" psql -h 127.0.0.1 -p 5432 -U "$TEST_DB_USERNAME" -d postgres -XqAtw -c 'show data_directory')"
+          mkdir -p target/nf-http-evidencias
+          git rev-parse HEAD > target/nf-http-evidencias/tested-sha.txt
+          python3 src/test/python/nf_arquivo_http.py --jar target/demo-0.0.1-SNAPSHOT.jar \
+            --out target/nf-http > target/nf-http-evidencias/runner.log 2>&1
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          results = json.loads(pathlib.Path('target/nf-http/resultados.json').read_text())
+          assert any(r.get('caso') == 'APROVADO' and r.get('casos') == 8 for r in results), results
+          expected = hashlib.sha256(pathlib.Path('target/demo-0.0.1-SNAPSHOT.jar').read_bytes()).hexdigest()
+          assert results[0]['jar_sha256'] == expected, results[0]
+          PY
 
       - name: Conferir regressoes e jsoup efetivo no JAR
         run: |
@@ -264,6 +333,11 @@ jobs:
           name: backend-pg16-e-captura-teste
           path: |
             target/surefire-reports
+            target/migrations-ci
+            target/verify-final
+            target/nf-ci
+            target/nf-http
+            target/nf-http-evidencias
             target/abertura-ci
             target/r01-ci
             target/cadastro-post-estado-evidencias

@@ -81,6 +81,9 @@ public class SecurityConfig {
 
                     // Arquivos do novo regime nunca são servidos por caminho estático, nem no modo dev.
                     authorize.requestMatchers("/uploads/.retiradas-v2/**").denyAll();
+                    // NF só é baixada pelo ID persistido e pela autorização do estoque.
+                    // Inclui o diretório legado, que pode conter resíduos históricos.
+                    authorize.requestMatchers("/uploads/.notas-fiscais/**", "/uploads/notas-fiscais/**").denyAll();
                     if (!securityEnabled) {
                         authorize.anyRequest().permitAll();
                         return;
