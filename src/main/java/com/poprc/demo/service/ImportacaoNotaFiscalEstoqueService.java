@@ -60,6 +60,7 @@ public class ImportacaoNotaFiscalEstoqueService {
     private final FuncionarioRepository funcionarioRepository;
     private final LocalEstoqueRepository localEstoqueRepository;
     private final EstoqueService estoqueService;
+    private final com.poprc.demo.storage.NotaFiscalArquivoStorage arquivoStorage;
 
     @Value("${app.upload.dir:rc_uploads}")
     private String uploadDir;
@@ -97,6 +98,7 @@ public class ImportacaoNotaFiscalEstoqueService {
         if (selecionados.isEmpty()) {
             throw new IllegalArgumentException("Selecione ao menos um item da nota fiscal.");
         }
+        selecionados.forEach(this::validarItem);
 
         Funcionario funcionario = funcionarioRepository.findById(usuario.getFuncionarioId())
                 .orElseThrow(() -> new IllegalArgumentException("Funcionário autenticado não encontrado."));
@@ -106,7 +108,7 @@ public class ImportacaoNotaFiscalEstoqueService {
 
         ImportacaoNotaFiscal importacao = new ImportacaoNotaFiscal();
         importacao.setNomeArquivo(arquivo.nome());
-        importacao.setArquivoPath(arquivar(arquivo));
+        importacao.setArquivoPath(arquivoStorage.gravar(arquivo.hash(), arquivo.tipo(), arquivo.bytes()));
         importacao.setHashSha256(arquivo.hash());
         importacao.setTipoArquivo(arquivo.tipo());
         importacao.setChaveAcesso(limitar(request.chaveAcesso(), 60));
@@ -127,7 +129,6 @@ public class ImportacaoNotaFiscalEstoqueService {
         int indice = 0;
         for (NotaFiscalEstoqueDTO.ItemConfirmacao item : selecionados) {
             indice++;
-            validarItem(item);
             Material material;
             String acao;
             if (item.materialId() != null) {
@@ -211,8 +212,10 @@ public class ImportacaoNotaFiscalEstoqueService {
     public ArquivoArmazenado carregarArquivo(Long id) {
         ImportacaoNotaFiscal importacao = buscarImportacao(id);
         Path diretorio = diretorioNotasFiscais();
+        Path privado = Path.of(uploadDir).toAbsolutePath().normalize().resolve(".notas-fiscais");
         Path arquivo = Path.of(importacao.getArquivoPath()).toAbsolutePath().normalize();
-        if (!arquivo.startsWith(diretorio) || !Files.isRegularFile(arquivo)) {
+        if ((!arquivo.startsWith(diretorio) && !arquivo.startsWith(privado))
+                || arquivo.getFileName().toString().endsWith(".part") || !Files.isRegularFile(arquivo)) {
             throw new IllegalArgumentException("O arquivo original desta nota fiscal não está disponível.");
         }
         String contentType = "XML".equalsIgnoreCase(importacao.getTipoArquivo())
@@ -401,20 +404,6 @@ public class ImportacaoNotaFiscalEstoqueService {
             throw exception;
         } catch (Exception exception) {
             throw new IllegalArgumentException("Conteúdo do arquivo inválido.");
-        }
-    }
-
-    private String arquivar(Arquivo arquivo) {
-        try {
-            Path diretorio = diretorioNotasFiscais();
-            Files.createDirectories(diretorio);
-            String extensao = arquivo.tipo().toLowerCase(Locale.ROOT);
-            Path destino = diretorio.resolve(arquivo.hash() + "." + extensao).normalize();
-            if (!destino.startsWith(diretorio)) throw new IllegalArgumentException("Destino de arquivo inválido.");
-            Files.write(destino, arquivo.bytes());
-            return destino.toString();
-        } catch (Exception exception) {
-            throw new IllegalArgumentException("Não foi possível arquivar a nota fiscal: " + exception.getMessage());
         }
     }
 

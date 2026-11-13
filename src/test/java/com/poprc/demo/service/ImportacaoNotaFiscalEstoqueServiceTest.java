@@ -19,6 +19,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -62,8 +63,17 @@ class ImportacaoNotaFiscalEstoqueServiceTest {
         estoqueService = mock(EstoqueService.class);
         service = new ImportacaoNotaFiscalEstoqueService(
                 importacaoRepository, itemRepository, materialRepository,
-                funcionarioRepository, localRepository, estoqueService);
+                funcionarioRepository, localRepository, estoqueService,
+                new com.poprc.demo.storage.NotaFiscalArquivoStorage(uploads.toString()));
         ReflectionTestUtils.setField(service, "uploadDir", uploads.toString());
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+    }
+
+    @AfterEach void finalizarTransacaoSimulada() {
+        var manager = org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations();
+        manager.forEach(sync -> sync.afterCompletion(org.springframework.transaction.support.TransactionSynchronization.STATUS_ROLLED_BACK));
+        org.springframework.transaction.support.TransactionSynchronizationManager.clear();
     }
 
     @ParameterizedTest
