@@ -1,33 +1,37 @@
 import { test, expect } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { campoAssinatura, desenharTeste } from './capturaAssinatura.mjs';
 
 const BASE = 'http://127.0.0.1:5177';
 const MARCA = 'TESTE — SEM VALIDADE OPERACIONAL';
 test.use({ baseURL: BASE, viewport: { width: 1280, height: 900 } });
 test.setTimeout(180_000);
 
-// Eventos reais de mouse: escreve TESTE por traços no canvas do fluxo normal.
-// Não chama fillText, não preenche base64 e não injeta assinaturas no banco.
-async function desenharTeste(page, canvas, deslocamento = 0) {
-  await canvas.scrollIntoViewIfNeeded();
-  const box = await canvas.boundingBox();
-  const strokes = [
-    [[0,0],[26,0]], [[13,0],[13,42]],
-    [[40,0],[40,42],[66,42]], [[40,0],[66,0]], [[40,21],[62,21]],
-    [[108,0],[82,0],[82,21],[108,21],[108,42],[82,42]],
-    [[122,0],[148,0]], [[135,0],[135,42]],
-    [[162,0],[162,42],[188,42]], [[162,0],[188,0]], [[162,21],[185,21]],
-  ];
-  for (const stroke of strokes) {
-    await page.mouse.move(box.x + 12 + deslocamento + stroke[0][0], box.y + 28 + stroke[0][1]);
-    await page.mouse.down();
-    for (const [x,y] of stroke.slice(1)) await page.mouse.move(box.x + 12 + deslocamento + x, box.y + 28 + y, { steps: 5 });
-    await page.mouse.up();
-  }
-  return canvas.evaluate(el => el.toDataURL('image/png'));
-}
+const papeisDocumento = [
+  ['Técnico responsável', 'Técnico responsável', 'assinaturaTecnicoBase64'],
+  ['Gestor do projeto RC', 'Gestor do projeto fictício', 'assinaturaGestorBase64'],
+  ['Gerente do fórum', 'Gerente do fórum', 'assinaturaGerenteBase64'],
+];
 
 test('nova OS fictícia captura TESTE nos documentos, vistoria, retirada e devolução', async ({ page, context }, testInfo) => {
+  const provas = {};
+  const conferir = (papel, captura, valores) => {
+    const png = Buffer.from(captura.split(',')[1], 'base64');
+    writeFileSync(testInfo.outputPath(`assinatura-${papel}.png`), png);
+    const hash = value => createHash('sha256').update(value).digest('hex');
+    provas[papel] = {
+      captura: hash(captura),
+      png: hash(png),
+      ...Object.fromEntries(Object.entries(valores).map(([etapa, valor]) => [
+        etapa, typeof valor === 'string' ? hash(valor) : null,
+      ])),
+    };
+    writeFileSync(testInfo.outputPath('comparacao-assinaturas.json'), JSON.stringify(provas, null, 2));
+    for (const [etapa, valor] of Object.entries(valores)) {
+      expect(valor, `${papel}: assinatura da captura independente na etapa ${etapa}`).toBe(captura);
+    }
+  };
   const api = async (path, data, method = 'POST', multipart) => {
     const csrf = await (await context.request.get(`${BASE}/api/auth/csrf`)).json();
     const response = await context.request.fetch(`${BASE}/api/${path}`, {
@@ -59,24 +63,28 @@ test('nova OS fictícia captura TESTE nos documentos, vistoria, retirada e devol
   await documento.getByRole('button', {name:'Salvar documento',exact:true}).click();
   await expect(documento.getByText('Documento salvo no servidor.', {exact:true})).toBeVisible();
 
-  const assinarDocumento = async (tipo) => {
-    for (let i=0; i<3; i++) {
-      await documento.getByRole('button', {name:'Assinar TESTE',exact:true}).first().click();
-      // Localizador estável: .last() passaria a apontar para o documento quando
-      // o modal de assinatura fecha, produzindo uma falsa falha de fechamento.
-      const modal = page.getByRole('dialog').filter({ hasText: /Desenhe a palavra TESTE/ });
+  const assinarDocumento = async (tipo, documentoId) => {
+    for (const [i, [rotulo, rotuloCartao, campo]] of papeisDocumento.entries()) {
+      await documento.getByText(`${rotuloCartao} — TESTE`, { exact: true }).locator('..')
+        .getByRole('button', {name:'Assinar TESTE',exact:true}).click();
+      const modal = page.getByRole('dialog', { name: new RegExp(`^${rotulo} -`) });
       await expect(modal.getByRole('button',{name:'Confirmar',exact:true})).toBeDisabled();
       await expect(modal.getByText(/Desenhe a palavra TESTE/)).toBeVisible();
-      const captured = await desenharTeste(page, modal.locator('canvas'), i*3);
+      const papel = `${tipo}-papel-${i+1}`;
+      const captured = await desenharTeste(page, modal.locator('canvas'), papel, i*3);
       await page.screenshot({path:testInfo.outputPath(`${tipo}-papel-${i+1}.png`)});
       const pending = page.waitForResponse(r => r.url().includes('/assinaturas/') && r.request().method() === 'PATCH');
       await modal.getByRole('button',{name:'Confirmar',exact:true}).click();
       const response = await pending;
       expect(response.status()).toBe(200);
-      expect(response.request().postDataJSON().assinaturaBase64).toBe(captured);
       const saved = await response.json();
-      const field = ['assinaturaTecnicoBase64','assinaturaGestorBase64','assinaturaGerenteBase64'][i];
-      expect(saved[field]).toBe(captured); // Backend não pode substituir a captura.
+      const persistido = (await api(`documentos-internos/comarca/${comarca.id}`, undefined, 'GET'))
+        .find(d => d.id === (documentoId ?? saved.id));
+      conferir(papel, captured, {
+        payload: response.request().postDataJSON().assinaturaBase64,
+        resposta: saved[campo],
+        persistido: persistido?.[campo],
+      });
       expect(saved.simulacao).toBe(true);
       await expect(modal).not.toBeVisible();
     }
@@ -91,15 +99,21 @@ test('nova OS fictícia captura TESTE nos documentos, vistoria, retirada e devol
   documento = page.getByRole('dialog',{name:/Documento Inicial/});
   await documento.getByRole('button',{name:new RegExp(`Encerramento #${final.id}`)}).click();
   documento = page.getByRole('dialog',{name:/Documento Final/});
-  await assinarDocumento('encerramento');
+  await assinarDocumento('encerramento', final.id);
 
   await page.getByText('Coletar Assinatura',{exact:true}).click();
   const modalVistoria = page.getByRole('dialog',{name:/Coletar Assinatura/});
   await expect(modalVistoria.getByRole('button',{name:'Confirmar',exact:true})).toBeDisabled();
-  const capturaVistoria = await desenharTeste(page, modalVistoria.locator('canvas'));
+  const capturaVistoria = await desenharTeste(page, modalVistoria.locator('canvas'), 'vistoria-campo');
   const aguardandoVistoria = page.waitForResponse(r => r.url().includes('/vistoria/assinatura') && r.request().method()==='PATCH');
   await modalVistoria.getByRole('button',{name:'Confirmar',exact:true}).click();
-  expect((await (await aguardandoVistoria).json()).assinaturaBase64).toBe(capturaVistoria);
+  const respostaVistoria = await aguardandoVistoria;
+  expect(respostaVistoria.status()).toBe(200);
+  conferir('vistoria-campo', capturaVistoria, {
+    payload: respostaVistoria.request().postDataJSON().assinaturaBase64,
+    resposta: (await respostaVistoria.json()).assinaturaBase64,
+    persistido: (await api(`comarcas/${comarca.id}`, undefined, 'GET')).assinaturaBase64,
+  });
   await expect(modalVistoria).not.toBeVisible();
   const fotoTeste = Buffer.from(capturaVistoria.split(',')[1], 'base64');
   await api(`comarcas/${comarca.id}/vistoria/foto`, undefined, 'POST', {foto:{name:'TESTE.png',mimeType:'image/png',buffer:fotoTeste}});
@@ -109,25 +123,46 @@ test('nova OS fictícia captura TESTE nos documentos, vistoria, retirada e devol
   await page.getByRole('button',{name:'Executar Retirada',exact:true}).click();
   const retirada = page.getByRole('dialog',{name:/Executar Retirada/});
   await expect(retirada.locator('canvas')).toHaveCount(2);
-  const capturas = [await desenharTeste(page,retirada.locator('canvas').nth(0)), await desenharTeste(page,retirada.locator('canvas').nth(1),3)];
+  const conferente = await desenharTeste(page,
+    campoAssinatura(retirada, /^Assinatura fictícia do conferente/).locator('canvas'), 'conferente');
+  const retirante = await desenharTeste(page,
+    campoAssinatura(retirada, /^Assinatura fictícia de quem levou/).locator('canvas'), 'retirante', 3);
+  expect(conferente).not.toBe(retirante);
   await page.screenshot({path:testInfo.outputPath('or-retirada-capturada.png')});
   let pending = page.waitForResponse(r => r.url().endsWith('/executar') && r.request().method()==='PATCH');
   await retirada.getByRole('button',{name:'Confirmar Retirada',exact:true}).click();
   let response = await pending;
   expect(response.status()).toBe(200);
   let ordem = await response.json();
-  expect(ordem.assinaturaConferenteBase64).toBe(capturas[0]);
-  expect(ordem.assinaturaRetiranteBase64).toBe(capturas[1]);
+  const consultarOrdem = async id => (await api(`ordens-retirada/os/${os.id}`, undefined, 'GET'))
+    .find(or => or.id === id);
+  let persistida = await consultarOrdem(ordem.id);
+  for (const [papel, captura, campo] of [
+    ['conferente', conferente, 'assinaturaConferenteBase64'],
+    ['retirante', retirante, 'assinaturaRetiranteBase64'],
+  ]) {
+    conferir(papel, captura, {
+      payload: response.request().postDataJSON()[campo],
+      resposta: ordem[campo],
+      persistido: persistida?.[campo],
+    });
+  }
   await expect(retirada).not.toBeVisible();
   await page.getByRole('button',{name:'Registrar Devolução',exact:true}).click();
   const devolucao = page.getByRole('dialog',{name:/Devolu/});
-  const recebido = await desenharTeste(page,devolucao.locator('canvas'));
+  const recebido = await desenharTeste(page,
+    campoAssinatura(devolucao, /^Assinatura fictícia de recebimento/).locator('canvas'), 'recebimento');
   pending = page.waitForResponse(r => r.url().endsWith('/devolver') && r.request().method()==='PATCH');
   await devolucao.getByRole('button',{name:'Confirmar Devolução',exact:true}).click();
   response = await pending;
   expect(response.status()).toBe(200);
   ordem = await response.json();
-  expect(ordem.assinaturaRecebimentoBase64).toBe(recebido);
+  persistida = await consultarOrdem(ordem.id);
+  conferir('recebimento', recebido, {
+    payload: response.request().postDataJSON().assinaturaRecebimentoBase64,
+    resposta: ordem.assinaturaRecebimentoBase64,
+    persistido: persistida?.assinaturaRecebimentoBase64,
+  });
   expect(ordem.simulacao).toBe(true);
   const materiais = await api('materiais', undefined, 'GET');
   expect(materiais).toHaveLength(1);
