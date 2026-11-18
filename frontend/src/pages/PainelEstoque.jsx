@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import api, { exigirSessaoAtual, revisaoAtualSessao, getApiErrorMessage } from "../services/api";
 import Modal from "../components/Modal";
+import SignatureBox from "../components/SignatureBox";
 import LoadingSpinner from "../components/LoadingSpinner";
 import Alert from "../components/Alert";
 import FilaPendenciasOperacionais from "../components/FilaPendenciasOperacionais";
@@ -136,115 +137,6 @@ const novaLinhaSimulacao = () => ({
   materialId: "",
   quantidade: "",
 });
-
-function SignatureBox({ label, value, onChange, simulacao = false }) {
-  const canvasRef = useRef(null);
-  const drawingRef = useRef(false);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = rect.width * ratio;
-    canvas.height = rect.height * ratio;
-    const context = canvas.getContext("2d");
-    context.scale(ratio, ratio);
-    context.lineWidth = 2;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    context.strokeStyle = "#0f172a";
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, rect.width, rect.height);
-
-    if (value?.startsWith("data:image")) {
-      const image = new Image();
-      image.onload = () => {
-        context.drawImage(image, 0, 0, rect.width, rect.height);
-      };
-      image.src = value;
-    }
-  }, [value]);
-
-  const getPoint = (event) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const sourceEvent = event.touches?.[0] || event;
-    return {
-      x: sourceEvent.clientX - rect.left,
-      y: sourceEvent.clientY - rect.top,
-    };
-  };
-
-  const startDrawing = (event) => {
-    event.preventDefault();
-    const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
-    const point = getPoint(event);
-    drawingRef.current = true;
-    context.beginPath();
-    context.moveTo(point.x, point.y);
-  };
-
-  const draw = (event) => {
-    if (!drawingRef.current) return;
-    event.preventDefault();
-    const context = canvasRef.current.getContext("2d");
-    const point = getPoint(event);
-    context.lineTo(point.x, point.y);
-    context.stroke();
-  };
-
-  const stopDrawing = () => {
-    if (!drawingRef.current) return;
-    drawingRef.current = false;
-    onChange(canvasRef.current.toDataURL("image/png"));
-  };
-
-  const clear = () => {
-    const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
-    const rect = canvas.getBoundingClientRect();
-    context.clearRect(0, 0, rect.width, rect.height);
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, rect.width, rect.height);
-    onChange("");
-  };
-
-  return (
-    <div className="space-y-2">
-      {simulacao && <p className="text-xs font-bold text-red-700">Desenhe TESTE; não use assinatura real.</p>}
-      <div className="flex items-center justify-between gap-2">
-        <label className="block text-sm font-semibold text-slate-700">
-          {simulacao ? label.replace("desenhada", "fictícia") + " — TESTE" : label}
-        </label>
-        <button
-          type="button"
-          onClick={clear}
-          className="rounded border border-slate-200 px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-50"
-        >
-          Limpar
-        </button>
-      </div>
-      <canvas
-        ref={canvasRef}
-        className="h-32 w-full rounded-lg border border-slate-300 bg-white touch-none"
-        onMouseDown={startDrawing}
-        onMouseMove={draw}
-        onMouseUp={stopDrawing}
-        onMouseLeave={stopDrawing}
-        onTouchStart={startDrawing}
-        onTouchMove={draw}
-        onTouchEnd={stopDrawing}
-      />
-      {!value && (
-        <p className="text-xs text-slate-400">
-          Assine no campo acima com mouse ou toque.
-        </p>
-      )}
-    </div>
-  );
-}
 
 export default function PainelEstoque({ secao = 'materiais' }) {
   const [erroCarregamento, setErroCarregamento] = useState(null);
