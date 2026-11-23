@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { ChevronDown, LogIn, Moon, ShieldCheck, Sun, User } from "lucide-react";
 import rcLogo from "../assets/rclogo.jpg";
 import { useAuth, homePorPerfil } from "../contexts/AuthContext";
@@ -19,7 +19,6 @@ export default function Login() {
   const [entrando, setEntrando] = useState(false);
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
-  const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
 
@@ -43,18 +42,19 @@ export default function Login() {
     api.get("/auth/dev-usuarios").then(({ data }) => { setUsuariosDev(data); if (data.length) setFuncionarioId(String(data[0].id)); }).catch(() => {});
   }, [configuracao.devLoginEnabled]);
 
-  if (!carregando && usuario) return <Navigate to={homePorPerfil(usuario.perfil)} replace />;
+  if (!carregando && usuario) {
+    return <Navigate to={location.state?.from || homePorPerfil(usuario.perfil)} replace />;
+  }
 
-  const concluir = (usuarioLogado) => navigate(location.state?.from || homePorPerfil(usuarioLogado.perfil), { replace: true });
   const entrarLocal = async (event) => {
     event.preventDefault(); setEntrando(true); setErro("");
-    try { concluir(await login(credenciais.cpf, credenciais.senha)); }
+    try { await login(credenciais.cpf, credenciais.senha); }
     catch (error) { setErro(getApiErrorMessage(error, "CPF ou senha inválidos.")); }
     finally { setEntrando(false); }
   };
   const entrarDev = async () => {
     setEntrando(true); setErro("");
-    try { concluir(await loginDesenvolvimento(Number(funcionarioId))); }
+    try { await loginDesenvolvimento(Number(funcionarioId)); }
     catch (error) { setErro(getApiErrorMessage(error)); }
     finally { setEntrando(false); }
   };
@@ -64,12 +64,12 @@ export default function Login() {
       setErro("As senhas não conferem."); setEntrando(false); return;
     }
     try {
-      concluir(await configurarAdministrador({
+      await configurarAdministrador({
         nome: primeiroAdmin.nome,
         cpf: primeiroAdmin.cpf,
         senha: primeiroAdmin.senha,
         cidade: primeiroAdmin.cidade,
-      }));
+      });
     } catch (error) { setErro(getApiErrorMessage(error, "Não foi possível configurar o administrador.")); }
     finally { setEntrando(false); }
   };

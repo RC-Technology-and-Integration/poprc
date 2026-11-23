@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { expect } from '@playwright/test';
 import { createServer, request } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -16,6 +17,7 @@ const rotaLogin = '/api/auth/login';
 const outroMenu = 'Abrir menu de R02 OUTRO OPERADOR';
 const menuA = 'Abrir menu de R02 ADMIN';
 const caminho = url => new URL(url).pathname;
+const timeoutInteracao = 20_000;
 
 const comando = (...args) => execFileSync(process.env.POP_RC_E2E_PYTHON,
   [process.env.POP_RC_E2E_HTTP_SCRIPT, ...args], { encoding: 'utf8' });
@@ -25,7 +27,7 @@ const registro = (caso, dados) => console.log(JSON.stringify({ caso, ...dados })
 
 async function abrir(context, path = '/login') {
   const page = await context.newPage();
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(timeoutInteracao);
   await page.goto(path);
   return page;
 }
@@ -48,6 +50,13 @@ async function sair(page) {
   await page.getByRole('button', { name: /Abrir menu de/ }).click();
   await page.getByRole('button', { name: 'Sair', exact: true }).last().click();
   await page.waitForURL('**/login');
+}
+
+function aguardarReconciliacaoSemSessao(page) {
+  return page.waitForResponse(response =>
+    caminho(response.url()) === '/api/auth/me' &&
+    response.request().method() === 'GET' &&
+    response.status() === 401);
 }
 
 async function concorrentes(fecharTitular) {
@@ -108,19 +117,20 @@ async function concorrentes(fecharTitular) {
     assert.equal(postsB, 0);
     assert.equal(await atual(context), null);
     if (fecharTitular) {
-      await a.close();
+      await Promise.all([aguardarReconciliacaoSemSessao(b), a.close()]);
     } else {
       const recebida = a.waitForResponse(r => caminho(r.url()) === rotaLogin);
       liberar.resolve();
       await recebida;
       await b.getByRole('button', { name: menuA, exact: true }).waitFor();
       assert.equal(await atual(context), fixture.funcionario);
-      await sair(b);
+      await Promise.all([aguardarReconciliacaoSemSessao(a), sair(b)]);
     }
-    await b.waitForFunction(async () => {
+    // A reconciliação já iniciou. Aguarde a conclusão dos locks antes do novo login.
+    await expect.poll(() => b.evaluate(async () => {
       const { held, pending } = await navigator.locks.query();
       return [...held, ...pending].every(lock => lock.name !== 'poprc:auth:transicao');
-    });
+    }), { timeout: timeoutInteracao }).toBe(true);
     await preencher(b, fixture.outroCpf);
     await entrar(b);
     await b.getByRole('button', { name: outroMenu, exact: true }).waitFor();
