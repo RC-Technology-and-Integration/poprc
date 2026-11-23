@@ -13,7 +13,10 @@ export default function ProtectedRoute({ children, roles }) {
       </div>
     );
   }
-  if (!usuario) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  if (!usuario) {
+    const { pathname, search, hash } = location;
+    return <Navigate to="/login" replace state={{ from: { pathname, search, hash } }} />;
+  }
   if (configuracao.securityEnabled && usuario.trocaSenhaObrigatoria && location.pathname !== "/perfil") {
     return <Navigate to="/perfil?trocarSenha=1" replace />;
   }

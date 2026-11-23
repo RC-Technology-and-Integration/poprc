@@ -39,7 +39,7 @@ function Pagina({ children, roles, layout = true }) {
 function App() {
   return (
     <AuthProvider>
-      <Router future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+      <Router>
         <Suspense fallback={<div className="grid min-h-dvh place-items-center bg-slate-50 dark:bg-slate-950"><LoadingSpinner /></div>}>
           <Routes>
             <Route path="/login" element={<Login />} />

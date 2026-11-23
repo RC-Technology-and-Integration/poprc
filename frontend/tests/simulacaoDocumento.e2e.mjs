@@ -44,8 +44,21 @@ test('nova OS fictícia captura TESTE nos documentos, vistoria, retirada e devol
   const config = await api('auth/config', undefined, 'GET');
   expect(config.securityEnabled).toBe(true);
   expect(config.bootstrapRequired).toBe(true); // Exige banco vazio próprio; recusa fixture habitual.
-  const admin = await api('auth/bootstrap', { nome: 'TESTE ADMIN FICTICIO', cpf: '12345678909', senha: 'SenhaFicticiaTESTE123', cidade: 'CIDADE FICTICIA TESTE' });
+  const cpf = '12345678909';
+  const senha = 'SenhaFicticiaTESTE123';
+  const admin = await api('auth/bootstrap', { nome: 'TESTE ADMIN FICTICIO', cpf, senha, cidade: 'CIDADE FICTICIA TESTE' });
   // CPF matemático de fixture de autenticação; documentos nunca usam esse CPF.
+  await test.step('login por CPF volta à URL protegida completa', async () => {
+    const destino = '/estoque/integracao?origem=teste#planilhas';
+    await api('auth/logout');
+    await page.goto(destino);
+    await expect(page).toHaveURL('/login');
+    await page.getByLabel('CPF', { exact: true }).fill(cpf);
+    await page.getByLabel('Senha', { exact: true }).fill(senha);
+    await page.getByRole('button', { name: 'Entrar com CPF' }).click();
+    await expect(page).toHaveURL(destino);
+    await expect(page.getByRole('heading', { name: 'Planilhas e integração', exact: true, level: 1 })).toBeVisible();
+  });
   expect((await api('documentos-internos/configuracao', undefined, 'GET')).simulacaoHabilitada).toBe(true);
   const contrato = (await api('contratos', { cliente:'CLIENTE FICTICIO TESTE', contrato:'TESTE-E2E', tipoContratante:'SETOR_PUBLICO', vigenciaInicio:'2026-01-01', vigenciaFim:'2030-01-01', valorGlobal:100 })).contrato;
   const projeto = (await api('projetos', { contrato:{id:contrato.id}, responsavel:{id:admin.funcionarioId}, nomeComarcaVinculada:'UNIDADE FICTICIA TESTE', dataInicio:'2026-01-01', dataFim:'2030-01-01' })).projeto;
