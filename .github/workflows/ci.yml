@@ -198,13 +198,14 @@ jobs:
           assert results[0]['jar_sha256'] == expected, results[0]
           PY
 
-      - name: Conferir regressoes e jsoup efetivo no JAR
+      - name: Conferir regressoes, jsoup e Spring Boot no JAR
         run: |
           mkdir -p target/jsoup-ci
           ./mvnw --batch-mode -Dspring.config.import= dependency:tree -Dverbose -DoutputFile=target/jsoup-ci/dependency-tree.txt
-          python3 - <<'PY'
+          PYTHONPATH=.github/scripts python3 - <<'PY'
           import hashlib, io, json, os, pathlib, subprocess, zipfile
           import xml.etree.ElementTree as ET
+          from spring_boot_manifest import verify_spring_boot_manifest
           output = pathlib.Path('target/jsoup-ci')
           tests = {}
           for name, count in {'AtividadeComarcaSanitizacaoTest': 24, 'JsoupXmlNamespaceRegressionTest': 2}.items():
@@ -218,6 +219,7 @@ jobs:
           assert len(origins) == 1 and 'org.jsoup:jsoup:jar:1.23.2:compile' in origins[0], origins
           jar = pathlib.Path('target/demo-0.0.1-SNAPSHOT.jar')
           with zipfile.ZipFile(jar) as app:
+              spring_boot_version = verify_spring_boot_manifest(app, pathlib.Path('pom.xml'))
               libraries = [name for name in app.namelist() if name.startswith('BOOT-INF/lib/') and name.endswith('.jar')]
               copies = []
               for name in libraries:
@@ -233,6 +235,7 @@ jobs:
           result = {'tested_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
                     'pr_head': os.environ['PR_HEAD'], 'java': java, 'tests': tests, 'maven_origins': origins,
                     'jar_sha256': hashlib.sha256(jar.read_bytes()).hexdigest(), 'libraries': libraries,
+                    'spring_boot_version': spring_boot_version,
                     'jsoup_copies': copies, 'jsoup_sha256': digest}
           (output / 'verification.json').write_text(json.dumps(result, indent=2))
           print(json.dumps(result, indent=2))
@@ -384,18 +387,20 @@ jobs:
       - name: Construir imagem do backend
         run: docker build --file "$BUILD_CONTEXT/deploy/docker/backend.Dockerfile" --tag poprc-backend:ci "$BUILD_CONTEXT"
 
-      - name: Conferir jsoup no backend empacotado na imagem
+      - name: Conferir jsoup e Spring Boot no backend empacotado na imagem
         run: |
           mkdir -p "$RUNNER_TEMP/jsoup-imagem"
           container=$(docker create poprc-backend:ci)
           trap 'docker rm "$container" >/dev/null' EXIT
           docker cp "$container:/app/poprc.jar" "$RUNNER_TEMP/jsoup-imagem/poprc.jar"
           docker image inspect --format '{{.Id}}' poprc-backend:ci > "$RUNNER_TEMP/jsoup-imagem/image-id.txt"
-          python3 - <<'PY'
+          PYTHONPATH=.github/scripts python3 - <<'PY'
           import hashlib, io, json, os, pathlib, zipfile
+          from spring_boot_manifest import verify_spring_boot_manifest
           output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'jsoup-imagem'
           jar = output / 'poprc.jar'
           with zipfile.ZipFile(jar) as app:
+              spring_boot_version = verify_spring_boot_manifest(app, pathlib.Path(os.environ['BUILD_CONTEXT']) / 'pom.xml')
               libraries = [name for name in app.namelist() if name.startswith('BOOT-INF/lib/') and name.endswith('.jar')]
               copies = []
               for name in libraries:
@@ -411,6 +416,7 @@ jobs:
           result = {'tested_sha': os.environ['APP_REVISION'], 'pr_head': os.environ['PR_HEAD'],
                     'image_id': (output / 'image-id.txt').read_text().strip(),
                     'jar_sha256': hashlib.sha256(jar.read_bytes()).hexdigest(), 'libraries': libraries,
+                    'spring_boot_version': spring_boot_version,
                     'jsoup_copies': copies, 'jsoup_sha256': digest}
           (output / 'verification.json').write_text(json.dumps(result, indent=2))
           print(json.dumps(result, indent=2))
