@@ -1,4 +1,4 @@
-FROM eclipse-temurin:25-jdk AS build
+FROM eclipse-temurin:25.0.5.1_2-jdk-noble@sha256:c7eef3dfeb81468533ea48c67bddaa8c7ca916454259e4d0d734d12bcff8e125 AS build
 
 WORKDIR /workspace
 COPY .mvn .mvn
@@ -8,7 +8,7 @@ RUN chmod +x mvnw && ./mvnw --batch-mode -DskipTests dependency:go-offline
 COPY src src
 RUN ./mvnw --batch-mode -DskipTests clean package
 
-FROM eclipse-temurin:25-jre
+FROM eclipse-temurin:25.0.5.1_2-jre-noble@sha256:2ec98aa522c472deadfd2b7c5b39bca680e33ef522a53a72f10789bdf89a6bb5
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
