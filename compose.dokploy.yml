@@ -1,6 +1,6 @@
 services:
   database:
-    image: postgres:16-alpine
+    image: postgres:16.16-alpine3.23@sha256:9cd3f3bf488bc5b8baa92709d87b7dfd903e6f479bddc87052ffc34adcedfa06
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-poprc}
@@ -39,6 +39,7 @@ services:
       APP_SECURITY_ENABLED: "true"
       APP_AMBIENTE: ${APP_AMBIENTE:-nao-definido}
       DOCUMENTOS_SIMULACAO_ENABLED: ${DOCUMENTOS_SIMULACAO_ENABLED:-false}
+      RETIRADAS_V2_ENABLED: ${RETIRADAS_V2_ENABLED:-false}
       DEV_LOGIN_ENABLED: "false"
       ZOHO_ENABLED: "false"
       REAUTHENTICATION_MINUTES: ${REAUTHENTICATION_MINUTES:-5}
